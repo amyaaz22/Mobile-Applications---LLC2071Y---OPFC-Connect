@@ -28,7 +28,9 @@ export default function EditPlayerPage() {
       .single()
     if (!data) { router.push('/coach/players'); return }
     setPlayer(data)
-    setGuardian(data.guardian ?? {})
+    // guardian comes as array from one-to-many join
+    const g = Array.isArray(data.guardian) ? data.guardian[0] : data.guardian
+    setGuardian(g ?? {})
     setPhotoPreview(data.photo_url ?? null)
   }
 
@@ -70,16 +72,23 @@ export default function EditPlayerPage() {
       photo_url: player.photo_url,
     }).eq('id', params.id as string)
 
-    if (pe) { toast.error('Failed to save player'); setSaving(false); return }
+    if (pe) { toast.error('Failed to save player: ' + pe.message); setSaving(false); return }
 
-    if (guardian?.id) {
-      await supabase.from('guardians').update({
-        full_name: guardian.full_name,
-        relationship: guardian.relationship,
-        phone_primary: guardian.phone_primary,
-        phone_secondary: guardian.phone_secondary,
-        email: guardian.email,
-      }).eq('id', guardian.id)
+    if (guardian) {
+      // guardian may come as array from supabase join
+      const guardianId = Array.isArray(guardian) ? guardian[0]?.id : guardian.id
+      const guardianData = Array.isArray(guardian) ? guardian[0] : guardian
+
+      if (guardianId) {
+        const { error: ge } = await supabase.from('guardians').update({
+          full_name: guardianData.full_name,
+          relationship: guardianData.relationship,
+          phone_primary: guardianData.phone_primary,
+          phone_secondary: guardianData.phone_secondary,
+          email: guardianData.email,
+        }).eq('id', guardianId)
+        if (ge) { toast.error('Guardian save failed: ' + ge.message); setSaving(false); return }
+      }
     }
 
     toast.success('Player updated!')
