@@ -80,18 +80,40 @@ export default function EditPlayerPage() {
       const guardianData = Array.isArray(guardian) ? guardian[0] : guardian
 
       if (guardianId) {
+        // Auto-link profile if email matches an existing account
+        let profileId = guardianData.profile_id
+        if (guardianData.email && !profileId) {
+          const { data: matchedProfile } = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('email', guardianData.email.toLowerCase().trim())
+            .single()
+          if (matchedProfile) profileId = matchedProfile.id
+        }
+
         const { error: ge } = await supabase.from('guardians').update({
           full_name: guardianData.full_name,
           relationship: guardianData.relationship,
           phone_primary: guardianData.phone_primary,
           phone_secondary: guardianData.phone_secondary,
           email: guardianData.email,
+          ...(profileId ? { profile_id: profileId } : {}),
         }).eq('id', guardianId)
         if (ge) { toast.error('Guardian save failed: ' + ge.message); setSaving(false); return }
+
+        // Also update the profile role if we just linked
+        if (profileId && !guardianData.profile_id) {
+          await supabase.from('profiles').update({ role: 'parent' }).eq('id', profileId)
+          toast.success('Player updated and parent account linked!')
+        } else {
+          toast.success('Player updated!')
+        }
+      } else {
+        toast.success('Player updated!')
       }
     }
 
-    toast.success('Player updated!')
+    setSaving(false)
     router.push(`/coach/players/${params.id}`)
   }
 
@@ -202,6 +224,17 @@ export default function EditPlayerPage() {
         {guardian && (
           <div className="card p-5 space-y-4">
             <h2 className="section-title">Guardian Information</h2>
+            {guardian?.profile_id ? (
+              <div className="flex items-center gap-2 p-2.5 bg-green-500/10 border border-green-500/20 rounded-xl mb-3">
+                <span className="text-green-400 text-xs">✓</span>
+                <span className="text-green-400 text-xs font-medium">Parent portal account linked</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl mb-3">
+                <span className="text-amber-400 text-xs">!</span>
+                <span className="text-amber-400 text-xs">No parent portal account linked. Enter their email below and save — if they have an account it will link automatically.</span>
+              </div>
+            )}
             <div>
               <label className="label mb-1.5 block">Full Name</label>
               <input className="input" value={guardian.full_name || ''} onChange={e => setG('full_name', e.target.value)}/>
