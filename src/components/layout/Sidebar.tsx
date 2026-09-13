@@ -9,13 +9,14 @@ import {
   Users, CreditCard, CalendarDays, BarChart3, Megaphone,
   Wallet, LogOut, QrCode, Home, ChevronRight, UserCircle,
   Settings, TrendingUp, Trophy, Star, PiggyBank, Receipt,
-  HeartHandshake, Package, ShieldCheck
+  HeartHandshake, Package, ShieldCheck, ClipboardList
 } from 'lucide-react'
 
 const coachNav: { href: string; label: string; icon: JSX.Element; area?: PermissionArea }[] = [
   { href: '/coach', label: 'Dashboard', icon: <Home size={18}/> },
   { href: '/coach/players', label: 'Players', icon: <Users size={18}/> },
   { href: '/coach/sessions', label: 'Sessions', icon: <CalendarDays size={18}/> },
+  { href: '/coach/drills', label: 'Field Sheets', icon: <ClipboardList size={18}/> },
   { href: '/coach/attendance', label: 'Attendance', icon: <BarChart3 size={18}/> },
   { href: '/coach/analytics', label: 'Analytics', icon: <TrendingUp size={18}/> },
   { href: '/coach/leaderboard', label: 'Leaderboard', icon: <Trophy size={18}/> },
