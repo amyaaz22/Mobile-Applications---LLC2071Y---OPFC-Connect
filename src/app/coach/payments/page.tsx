@@ -5,11 +5,12 @@ import { paymentStatusColor, formatDate, getCurrentMonth, getMonthLabel, monthly
 import { toast } from 'react-hot-toast'
 import { CheckCircle, Clock, Plus, X, Download, Wallet, Receipt } from 'lucide-react'
 import * as XLSX from 'xlsx'
+import { useConfigList } from '@/hooks/useConfigList'
 
-const METHODS = ['Cash', 'Bank Transfer', 'Mobile Money (Juice)', 'Other']
+const FALLBACK_METHODS = ['Cash', 'Bank Transfer', 'Mobile Money', 'Other']
 
-function RecordPaymentModal({ players, entryFee, feeFor, onClose, onSaved }: {
-  players: any[]; entryFee: number; feeFor: (cat: string) => number
+function RecordPaymentModal({ players, entryFee, feeFor, methods, onClose, onSaved }: {
+  players: any[]; entryFee: number; feeFor: (cat: string) => number; methods: string[]
   onClose: () => void; onSaved: () => void
 }) {
   const supabase = createClient()
@@ -84,7 +85,7 @@ function RecordPaymentModal({ players, entryFee, feeFor, onClose, onSaved }: {
             <div>
               <label className="label mb-1.5 block">Method</label>
               <select className="input" value={form.method} onChange={e => set('method', e.target.value)}>
-                {METHODS.map(m => <option key={m}>{m}</option>)}
+                {methods.map(m => <option key={m}>{m}</option>)}
               </select>
             </div>
           )}
@@ -94,7 +95,7 @@ function RecordPaymentModal({ players, entryFee, feeFor, onClose, onSaved }: {
           <div>
             <label className="label mb-1.5 block">Method</label>
             <select className="input" value={form.method} onChange={e => set('method', e.target.value)}>
-              {METHODS.map(m => <option key={m}>{m}</option>)}
+              {methods.map(m => <option key={m}>{m}</option>)}
             </select>
           </div>
         )}
@@ -140,6 +141,7 @@ export default function PaymentsPage() {
   const [tab, setTab] = useState<'grid' | 'ledger'>('grid')
   const [showModal, setShowModal] = useState(false)
   const [ledgerFilter, setLedgerFilter] = useState({ type: 'all', status: 'all' })
+  const methods = useConfigList('payment_methods', FALLBACK_METHODS)
 
   useEffect(() => { fetchData() }, [month])
   useEffect(() => {
@@ -411,7 +413,7 @@ export default function PaymentsPage() {
 
       {showModal && (
         <RecordPaymentModal
-          players={players} entryFee={entryFee} feeFor={feeFor}
+          players={players} entryFee={entryFee} feeFor={feeFor} methods={methods}
           onClose={() => setShowModal(false)}
           onSaved={() => { setShowModal(false); fetchData(); fetchLedger() }}
         />

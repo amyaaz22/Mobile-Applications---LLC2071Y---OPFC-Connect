@@ -7,6 +7,7 @@ import Link from 'next/link'
 import * as XLSX from 'xlsx'
 
 const FALLBACK_CATEGORIES = ['U9', 'U13', 'First Team']
+const FALLBACK_POSITIONS = ['GK', 'DEF', 'MID', 'FWD']
 const CATEGORY_COLORS = [
   'bg-orange-500/20 text-orange-300 border-orange-500/30',
   'bg-purple-500/20 text-purple-300 border-purple-500/30',
@@ -33,15 +34,16 @@ interface ImportRow {
   error?: string
 }
 
-function buildSampleData(categories: string[]) {
+function buildSampleData(categories: string[], positions: string[]) {
   const cats = categories.length ? categories : FALLBACK_CATEGORIES
-  const pick = (i: number) => cats[i % cats.length]
+  const pos = positions.length ? positions : FALLBACK_POSITIONS
+  const pick = (list: string[], i: number) => list[i % list.length]
   return [
     {
       'Full Name': 'Yannick Ferreira',
       'Date of Birth (DD/MM/YYYY)': '14/03/2006',
-      'Category': pick(2),
-      'Position (GK / DEF / MID / FWD)': 'FWD',
+      'Category': pick(cats, 2),
+      'Position': pick(pos, pos.length - 1),
       'Nationality': 'Mauritian',
       'School / Grade': 'Grade 11 — Royal College Port Louis',
       'Address': 'Avenue des Cocotiers, Pailles',
@@ -54,8 +56,8 @@ function buildSampleData(categories: string[]) {
     {
       'Full Name': 'Rayan Boodhoo',
       'Date of Birth (DD/MM/YYYY)': '22/07/2011',
-      'Category': pick(1),
-      'Position (GK / DEF / MID / FWD)': 'MID',
+      'Category': pick(cats, 1),
+      'Position': pick(pos, Math.floor(pos.length / 2)),
       'Nationality': 'Mauritian',
       'School / Grade': 'Grade 6 — Raffray Government School',
       'Address': 'Rue de la Paix, Pailles',
@@ -68,8 +70,8 @@ function buildSampleData(categories: string[]) {
     {
       'Full Name': 'Kian Bhookhun',
       'Date of Birth (DD/MM/YYYY)': '11/09/2016',
-      'Category': pick(0),
-      'Position (GK / DEF / MID / FWD)': 'GK',
+      'Category': pick(cats, 0),
+      'Position': pick(pos, 0),
       'Nationality': 'Mauritian',
       'School / Grade': 'Grade 1 — Pailles Primary',
       'Address': 'Résidence Raffray, Pailles',
@@ -82,14 +84,15 @@ function buildSampleData(categories: string[]) {
   ]
 }
 
-function downloadSample(categories: string[]) {
+function downloadSample(categories: string[], positions: string[]) {
   const cats = categories.length ? categories : FALLBACK_CATEGORIES
+  const pos = positions.length ? positions : FALLBACK_POSITIONS
   const wb = XLSX.utils.book_new()
-  const ws = XLSX.utils.json_to_sheet(buildSampleData(cats))
+  const ws = XLSX.utils.json_to_sheet(buildSampleData(cats, pos))
 
   // Column widths
   ws['!cols'] = [
-    { wch: 24 }, { wch: 22 }, { wch: 16 }, { wch: 28 },
+    { wch: 24 }, { wch: 22 }, { wch: 16 }, { wch: 12 },
     { wch: 14 }, { wch: 30 }, { wch: 28 }, { wch: 22 },
     { wch: 22 }, { wch: 22 }, { wch: 22 }, { wch: 24 },
   ]
@@ -105,7 +108,7 @@ function downloadSample(categories: string[]) {
     ['2. Do NOT change column headers'],
     ['3. Date of Birth must be in DD/MM/YYYY format (e.g. 14/03/2006)'],
     [`4. Category must be exactly one of: ${cats.join(', ')} (set in Club Settings)`],
-    ['5. Position must be exactly: GK, DEF, MID, or FWD'],
+    [`5. Position must be exactly one of: ${pos.join(', ')} (set in Club Settings)`],
     ['6. Guardian Phone should be the WhatsApp number'],
     ['7. Guardian Email is optional but recommended for player card delivery'],
     ['8. Medical Notes is optional — leave blank if none'],
@@ -138,19 +141,19 @@ function parseDate(raw: string): string | null {
   return null
 }
 
-function validateRow(row: any, i: number, categories: string[]): ImportRow | null {
+function validateRow(row: any, i: number, categories: string[], positions: string[]): ImportRow | null {
   const name = String(row['Full Name'] ?? '').trim()
   if (!name) return null // skip empty rows
 
   const dob = parseDate(row['Date of Birth (DD/MM/YYYY)'])
   // 'Category' is the current header; older templates used the parenthetical form
   const category = String(row['Category'] ?? row['Category (U9 / U13 / First Team)'] ?? '').trim()
-  const position = String(row['Position (GK / DEF / MID / FWD)'] ?? '').trim()
+  const position = String(row['Position'] ?? row['Position (GK / DEF / MID / FWD)'] ?? '').trim()
 
   const errors: string[] = []
   if (!dob) errors.push('Invalid date of birth')
   if (!categories.includes(category)) errors.push(`Invalid category (must be one of: ${categories.join(', ')})`)
-  if (!['GK','DEF','MID','FWD'].includes(position)) errors.push('Invalid position')
+  if (!positions.includes(position)) errors.push(`Invalid position (must be one of: ${positions.join(', ')})`)
   if (!String(row['Guardian Full Name'] ?? '').trim()) errors.push('Guardian name required')
   if (!String(row['Guardian Phone (WhatsApp)'] ?? '').trim()) errors.push('Guardian phone required')
 
@@ -181,11 +184,14 @@ export default function ImportPlayersPage() {
   const [done, setDone] = useState(false)
   const [results, setResults] = useState<{ success: number; failed: number }>({ success: 0, failed: 0 })
   const [categories, setCategories] = useState<string[]>(FALLBACK_CATEGORIES)
+  const [positions, setPositions] = useState<string[]>(FALLBACK_POSITIONS)
   const [entryFee, setEntryFee] = useState<number | null>(null)
 
   useEffect(() => {
     supabase.from('club_settings').select('value').eq('key', 'categories').single()
       .then(({ data }) => { if (data?.value) setCategories(data.value as string[]) })
+    supabase.from('club_settings').select('value').eq('key', 'positions').single()
+      .then(({ data }) => { if (data?.value) setPositions(data.value as string[]) })
     supabase.from('club_settings').select('value').eq('key', 'fees').single()
       .then(({ data }) => { const entry = (data?.value as any)?.entry; if (entry) setEntryFee(entry) })
   }, [])
@@ -200,7 +206,7 @@ export default function ImportPlayersPage() {
       const ws = wb.Sheets['Players'] ?? wb.Sheets[wb.SheetNames[0]]
       const json = XLSX.utils.sheet_to_json(ws)
       const parsed = (json as any[])
-        .map((row: any, i: number) => validateRow(row, i, categories))
+        .map((row: any, i: number) => validateRow(row, i, categories, positions))
         .filter(Boolean) as ImportRow[]
       setRows(parsed)
       setDone(false)
@@ -297,7 +303,7 @@ export default function ImportPlayersPage() {
           <h1 className="page-title">Import Players</h1>
           <p className="text-white/30 text-sm mt-1">Upload an Excel file to register multiple players at once</p>
         </div>
-        <button onClick={() => downloadSample(categories)}
+        <button onClick={() => downloadSample(categories, positions)}
           className="btn-secondary flex items-center gap-2">
           <Download size={16}/> Download Template
         </button>

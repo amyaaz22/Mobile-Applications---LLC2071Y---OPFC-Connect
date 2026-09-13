@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { toast } from 'react-hot-toast'
 import { ArrowLeft, Upload, X } from 'lucide-react'
 import Link from 'next/link'
+import { useConfigList } from '@/hooks/useConfigList'
 
 export default function EditPlayerPage() {
   const params = useParams()
@@ -18,6 +19,8 @@ export default function EditPlayerPage() {
   const [uploading, setUploading] = useState(false)
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
   const [categories, setCategories] = useState<string[]>(['U9', 'U13', 'First Team'])
+  const positions = useConfigList('positions', ['GK', 'DEF', 'MID', 'FWD'])
+  const relationships = useConfigList('guardian_relationships', ['Father', 'Mother', 'Uncle', 'Aunt', 'Sibling', 'Other'])
 
   useEffect(() => { fetchPlayer() }, [params.id])
   useEffect(() => {
@@ -202,11 +205,9 @@ export default function EditPlayerPage() {
             </div>
             <div>
               <label className="label mb-1.5 block">Position</label>
-              <select className="input" value={player.position || 'FWD'} onChange={e => setP('position', e.target.value)}>
-                <option value="GK">GK</option>
-                <option value="DEF">DEF</option>
-                <option value="MID">MID</option>
-                <option value="FWD">FWD</option>
+              <select className="input" value={player.position || positions[0]} onChange={e => setP('position', e.target.value)}>
+                {(positions.includes(player.position) ? positions : [player.position, ...positions].filter(Boolean))
+                  .map((p: string) => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
           </div>
@@ -247,7 +248,7 @@ export default function EditPlayerPage() {
               <div>
                 <label className="label mb-1.5 block">Relationship</label>
                 <select className="input" value={guardian.relationship || 'Father'} onChange={e => setG('relationship', e.target.value)}>
-                  {['Father','Mother','Uncle','Aunt','Sibling','Other'].map(r => <option key={r}>{r}</option>)}
+                  {relationships.map((r: string) => <option key={r}>{r}</option>)}
                 </select>
               </div>
               <div>

@@ -4,22 +4,33 @@ import { createClient } from '@/lib/supabase/client'
 import { toast } from 'react-hot-toast'
 import { Plus, Trash2, Edit3, Download, Upload, Package, AlertTriangle, X } from 'lucide-react'
 import * as XLSX from 'xlsx'
+import { useConfigList } from '@/hooks/useConfigList'
+import { usePermissionGuard } from '@/hooks/usePermissionGuard'
 
-const CATEGORIES = ['Jerseys', 'Balls', 'Training Equipment', 'Goals & Nets', 'Medical Kit', 'Bibs & Cones', 'Other']
-const CONDITIONS = ['New', 'Good', 'Worn', 'Damaged']
+const FALLBACK_CATEGORIES = ['Jerseys', 'Balls', 'Training Equipment', 'Goals & Nets', 'Medical Kit', 'Bibs & Cones', 'Other']
+const FALLBACK_CONDITIONS = ['New', 'Good', 'Worn', 'Damaged']
 
-const conditionColor = (c: string) => ({
-  New: 'bg-green-500/15 text-green-300 border-green-500/25',
-  Good: 'bg-teal-500/15 text-teal-300 border-teal-500/25',
-  Worn: 'bg-amber-500/15 text-amber-300 border-amber-500/25',
-  Damaged: 'bg-red-500/15 text-red-300 border-red-500/25',
-}[c] ?? 'bg-white/10 text-white/50 border-white/10')
+const CONDITION_PALETTE = [
+  'bg-green-500/15 text-green-300 border-green-500/25',
+  'bg-teal-500/15 text-teal-300 border-teal-500/25',
+  'bg-amber-500/15 text-amber-300 border-amber-500/25',
+  'bg-red-500/15 text-red-300 border-red-500/25',
+  'bg-purple-500/15 text-purple-300 border-purple-500/25',
+  'bg-sky-500/15 text-sky-300 border-sky-500/25',
+]
+function conditionColor(c: string, conditions: string[]) {
+  const i = conditions.indexOf(c)
+  return CONDITION_PALETTE[i >= 0 ? i % CONDITION_PALETTE.length : CONDITION_PALETTE.length - 1]
+}
 
 const emptyForm = { name: '', category: 'Training Equipment', quantity: '1', condition: 'Good', location: '', assigned_to: '', min_stock: '0', notes: '' }
 
 export default function InventoryPage() {
   const supabase = createClient()
   const fileRef = useRef<HTMLInputElement>(null)
+  const permitted = usePermissionGuard('inventory')
+  const CATEGORIES = useConfigList('inventory_categories', FALLBACK_CATEGORIES)
+  const CONDITIONS = useConfigList('inventory_conditions', FALLBACK_CONDITIONS)
   const [items, setItems] = useState<any[]>([])
   const [players, setPlayers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -128,6 +139,12 @@ export default function InventoryPage() {
   ), [items, categoryFilter, lowStockOnly])
 
   const lowStockCount = items.filter(i => i.quantity <= (i.min_stock ?? 0)).length
+
+  if (!permitted) return (
+    <div className="flex items-center justify-center min-h-screen text-white/30">
+      <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>
+    </div>
+  )
 
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto">
@@ -266,7 +283,7 @@ export default function InventoryPage() {
                         <span className={`font-semibold text-sm ${low ? 'text-amber-400' : 'text-white'}`}>{item.quantity}</span>
                         {low && <AlertTriangle size={12} className="inline ml-1.5 text-amber-400"/>}
                       </td>
-                      <td className="px-4 py-3"><span className={`badge text-xs ${conditionColor(item.condition)}`}>{item.condition}</span></td>
+                      <td className="px-4 py-3"><span className={`badge text-xs ${conditionColor(item.condition, CONDITIONS)}`}>{item.condition}</span></td>
                       <td className="px-4 py-3 text-white/50 text-xs">{item.location ?? '—'}</td>
                       <td className="px-4 py-3 text-white/50 text-xs">{item.player?.full_name ?? '—'}</td>
                       <td className="px-4 py-3">

@@ -7,6 +7,7 @@ import {
   ResponsiveContainer, Cell, CartesianGrid,
 } from 'recharts'
 import { TrendingUp, TrendingDown, Wallet, Receipt, HeartHandshake, ArrowRight } from 'lucide-react'
+import { usePermissionGuard } from '@/hooks/usePermissionGuard'
 
 const ChartTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null
@@ -32,6 +33,7 @@ function monthLabel(key: string) {
 
 export default function FinancePage() {
   const supabase = createClient()
+  const permitted = usePermissionGuard('finance')
   const [loading, setLoading] = useState(true)
   const [payments, setPayments] = useState<any[]>([])
   const [income, setIncome] = useState<any[]>([])
@@ -52,7 +54,7 @@ export default function FinancePage() {
     setLoading(false)
   }
 
-  if (loading) return (
+  if (loading || !permitted) return (
     <div className="flex items-center justify-center min-h-screen text-white/30">
       <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>
     </div>

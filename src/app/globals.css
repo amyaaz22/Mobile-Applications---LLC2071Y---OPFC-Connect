@@ -40,6 +40,14 @@
   .input {
     @apply bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-white/30
     focus:outline-none focus:border-teal-400/50 focus:ring-1 focus:ring-teal-400/30 transition-all w-full;
+    color-scheme: dark;
+  }
+  /* Native <option> popups ignore color-scheme in some browsers and fall back
+     to a white listbox — style them explicitly so every <select>.input stays
+     readable instead of showing near-invisible white-on-white text. */
+  select.input option {
+    background-color: #112233;
+    color: white;
   }
   .label {
     @apply text-xs font-semibold uppercase tracking-wider text-white/40;

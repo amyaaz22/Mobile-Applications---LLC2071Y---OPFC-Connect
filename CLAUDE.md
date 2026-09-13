@@ -20,7 +20,7 @@ Built for the club's daily operations AND as a Year 3 BSc dissertation project.
 - Push to GitHub main → Vercel auto-deploys (takes ~1 min)
 - Always run `npm run build` locally before pushing to catch errors
 - Environment variables are set in Vercel dashboard (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY)
-- **Before this deploys correctly, run `supabase/schema_v3_additions.sql` in the Supabase SQL Editor** (additive — safe on the live DB, adds expenses/income/inventory tables, fixes a profile role-escalation hole, widens payments.type, converts point_rules/global_awards category columns to arrays)
+- **Before this deploys correctly, run `supabase/schema_v3_additions.sql` then `schema_v4_additions.sql` in the Supabase SQL Editor**, in that order (both additive — safe on the live DB). v3 adds expenses/income/inventory tables, fixes a profile role-escalation hole, widens payments.type, converts point_rules/global_awards category columns to arrays. v4 frees players.position / announcements.tag / inventory_items.condition from their old CHECK constraints (Club Settings → Dropdown Lists now owns those lists), seeds the new dropdown-list keys, and adds profiles.permissions for granular admin access.
 - Coach/parent invites (Staff & Parents page) send real emails via Supabase Auth — needs an email provider configured in the Supabase project (default Supabase SMTP is rate-limited; for real usage swap in a custom SMTP provider under Auth settings)
 
 ---
@@ -69,6 +69,7 @@ Built for the club's daily operations AND as a Year 3 BSc dissertation project.
 **RBAC notes (relevant to the dissertation writeup):**
 - `profiles.role` is protected by a `BEFORE UPDATE` trigger (`protect_profile_role`, added in `schema_v3_additions.sql`) — a signed-in user cannot grant themselves a higher role by calling `supabase.from('profiles').update({ role: 'admin' })` directly; only an existing admin's update is honored. This closed a real self-escalation hole that existed in `schema_v2.sql`.
 - Every `players`/`sessions`/`payments`/etc. RLS policy still grants identical power to any `coach`. `profiles.assigned_categories` (text[]) lets an admin scope a coach to specific categories from the Staff page. It's wired into the **Players list** (filter chips + query) as a UI-level convenience only — every other coach-facing screen and every RLS policy still grants full access regardless of this field. Extending the same filter elsewhere, or promoting it to a real RLS boundary, is future work — don't describe it as a security guarantee until it is one.
+- `profiles.permissions` (text[], v4) narrows a specific **admin** account instead of all-or-nothing — see `src/lib/permissions.ts` for the area list (`finance`, `inventory`, `settings`, `staff`) and `hasPermission()`. Null/empty = unrestricted (the default — every admin created via the old manual-SQL bootstrap is unrestricted). Only an *unrestricted* admin can change anyone's `role` or `permissions` (enforced by the same `protect_profile_role` trigger, extended in v4) — a narrowed admin cannot grant itself more access. `coach` accounts are untouched by this; it's purely an admin-vs-admin mechanism, separate from `assigned_categories`. Enforced client-side via `usePermissionGuard(area)` at the top of each gated page (`settings`, `finance`, `expenses`, `income`, `inventory`, `staff`) plus a matching filter in `Sidebar.tsx` — same "100% client-side auth" caveat as everything else in this section.
 
 ---
 
@@ -79,7 +80,7 @@ src/
     (auth)/login, register, forgot-password
     coach/
       page.tsx              — Dashboard
-      players/page.tsx      — Player list
+      players/page.tsx      — Player list, category filter, Excel export, "Download All Cards" (bulk PDF)
       players/[id]/page.tsx — Player detail + stats editor + QR
       players/[id]/edit/    — Edit player + guardian
       players/new/          — Register new player (3-step)
@@ -98,7 +99,7 @@ src/
       inventory/            — Kit/equipment tracking, low-stock alerts
       staff/                — Admin-only: invite/promote coaches, manage parent contacts
       announcements/        — Post/delete announcements
-      settings/             — Club settings (logo, categories, fees)
+      settings/             — Club settings (logo, categories, fees) + Dropdown Lists (positions, guardian relationships, announcement tags, payment methods, expense/income/inventory categories, inventory conditions — every dropdown in the app that used to be hardcoded)
       profile/              — Coach profile
     parent/
       page.tsx              — Parent dashboard (incl. points total)
@@ -128,19 +129,24 @@ src/
       ParentGuard.tsx       — Auth guard for parent pages
       PlayerGuard.tsx       — Auth guard for player pages
     cards/
-      PassCard.tsx          — Club pass card (front + QR back) PDF
+      PassCard.tsx          — Club pass card (front + QR back) PDF — also reused off-screen for the bulk "Download All Cards" export
       FanCard.tsx           — Parent-customisable fan card
       PlayerCard.tsx        — FIFA-style card (kept for reference)
     charts/
       AttendanceChart.tsx   — Recharts bar chart
     scanner/
       QRScanner.tsx         — Camera QR scanner component
+    ListEditor.tsx          — Reusable add/rename/remove chip list editor, used by every Dropdown Lists section in Club Settings
     PWAInit.tsx             — Registers service worker
-  lib/supabase/
-    client.ts               — Browser client (use everywhere)
-    server.ts               — Server client (API routes only)
+  lib/
+    supabase/
+      client.ts             — Browser client (use everywhere)
+      server.ts             — Server client (API routes only)
+    permissions.ts          — PERMISSION_AREAS + hasPermission() for granular admin access (see RBAC notes)
   hooks/
     usePWA.ts               — Online/offline + install prompt
+    useConfigList.ts         — Fetches one admin-configurable dropdown list from club_settings
+    usePermissionGuard.ts    — Redirects a narrowed admin away from a page their `permissions` doesn't cover
   types/
     database.ts             — TypeScript types
   middleware.ts             — Minimal: no redirects, just passes through
@@ -151,6 +157,7 @@ public/
 supabase/
   schema_v2.sql             — Base schema (already applied — run once on a fresh project)
   schema_v3_additions.sql   — Additive migration: money/inventory tables, RBAC fix, multi-category (run in Supabase SQL Editor)
+  schema_v4_additions.sql   — Additive migration: frees position/tag/condition columns for Dropdown Lists, seeds them, adds profiles.permissions (run AFTER v3)
 ```
 
 ---
@@ -178,16 +185,18 @@ supabase/
 ---
 
 ## Current Known Issues / TODO
-Everything from the previous list (dynamic categories, pass card guardian phone,
-logo everywhere, players export, scanner link, leaderboard + points for
-parents/players) is done. Also done in this pass: full payments rebuild
-(entry fees, Record Payment, ledger + export), points rework (custom
-one-off awards, per-player history, multi-category rule targeting),
-Expenses/Income/Inventory modules, and the Staff & Parents admin page
-(invite/promote coaches, manage parent contacts, import/export both).
+Also done since the last update: every dropdown that was hardcoded (positions,
+guardian relationships, announcement tags, payment methods, expense/income/
+inventory categories, inventory conditions) is now editable from Club Settings
+→ Dropdown Lists, with no code change needed; native `<select>` popups no
+longer render white-on-white in the dark theme; granular admin permissions
+(`profiles.permissions`, `src/lib/permissions.ts`) let the primary admin
+narrow a second admin account to specific areas instead of all-or-nothing;
+and the players list has a "Download All Cards" button that bundles every
+active player's pass card into one PDF.
 
-- [ ] `assigned_categories` coach scoping is only wired into the Players list — extend to Sessions, Payments, Points if per-coach scoping needs to feel consistent, or promote it to a real RLS boundary if it needs to be a hard guarantee
-- [ ] Expense/inventory categories are fixed lists in code (not in Club Settings like player categories) — move to `club_settings` if the club wants to customize them without a code change
+- [ ] `assigned_categories` coach scoping and `permissions` admin scoping are each wired into a handful of pages (Players list; Settings/Finance/Expenses/Income/Inventory/Staff respectively) — extend elsewhere or promote to a real RLS boundary if either needs to feel fully consistent or become a hard guarantee
+- [ ] `MobileNav.tsx`'s bottom-nav icons aren't filtered by `permissions` yet (the pages themselves still redirect correctly via `usePermissionGuard`, so this is a UX nicety, not a security gap)
 - [ ] Coach/parent invites need a real email provider configured in Supabase Auth (default SMTP is rate-limited) — see Deployment section
 - [ ] No payment gateway yet (Stripe / MCB Juice) — payments are still manually recorded
 - [ ] `expenses`/`income` have no receipt/attachment upload yet (`receipt_url` column exists on `expenses`, unused)

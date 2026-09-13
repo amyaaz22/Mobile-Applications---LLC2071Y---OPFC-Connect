@@ -5,8 +5,11 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'react-hot-toast'
 import { ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
+import { useConfigList } from '@/hooks/useConfigList'
 
 const FALLBACK_CATEGORIES = ['U9', 'U13', 'First Team']
+const FALLBACK_POSITIONS = ['GK', 'DEF', 'MID', 'FWD']
+const FALLBACK_RELATIONSHIPS = ['Father', 'Mother', 'Uncle', 'Aunt', 'Sibling', 'Other']
 
 export default function NewPlayerPage() {
   const supabase = createClient()
@@ -14,6 +17,8 @@ export default function NewPlayerPage() {
   const [saving, setSaving] = useState(false)
   const [step, setStep] = useState(1)
   const [categories, setCategories] = useState<string[]>(FALLBACK_CATEGORIES)
+  const positions = useConfigList('positions', FALLBACK_POSITIONS)
+  const relationships = useConfigList('guardian_relationships', FALLBACK_RELATIONSHIPS)
 
   const [player, setPlayer] = useState({
     full_name: '', date_of_birth: '', category: '', position: 'FWD',
@@ -102,10 +107,7 @@ export default function NewPlayerPage() {
               <div>
                 <label className="label mb-1.5 block">Position *</label>
                 <select className="input" value={player.position} onChange={e => setP('position', e.target.value)}>
-                  <option value="GK">GK — Goalkeeper</option>
-                  <option value="DEF">DEF — Defender</option>
-                  <option value="MID">MID — Midfielder</option>
-                  <option value="FWD">FWD — Forward</option>
+                  {positions.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
               </div>
             </div>
@@ -137,7 +139,7 @@ export default function NewPlayerPage() {
               <div>
                 <label className="label mb-1.5 block">Relationship *</label>
                 <select className="input" value={guardian.relationship} onChange={e => setG('relationship', e.target.value)}>
-                  {['Father','Mother','Uncle','Aunt','Sibling','Other'].map(r => <option key={r}>{r}</option>)}
+                  {relationships.map(r => <option key={r}>{r}</option>)}
                 </select>
               </div>
               <div>

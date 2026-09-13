@@ -61,6 +61,7 @@ export default function NewSessionPage() {
               <option value="training">Training</option>
               <option value="match">Match</option>
               <option value="tournament">Tournament</option>
+              <option value="event">Event</option>
             </select>
           </div>
           <div>

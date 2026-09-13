@@ -4,8 +4,9 @@ import { createClient } from '@/lib/supabase/client'
 import { formatDate } from '@/lib/utils'
 import { toast } from 'react-hot-toast'
 import { Plus, Trash2, Megaphone } from 'lucide-react'
+import { useConfigList } from '@/hooks/useConfigList'
 
-const TAGS = ['General', 'Admin', 'Event', 'Shop', 'Urgent']
+const FALLBACK_TAGS = ['General', 'Admin', 'Event', 'Shop', 'Urgent']
 
 export default function AnnouncementsPage() {
   const supabase = createClient()
@@ -14,6 +15,7 @@ export default function AnnouncementsPage() {
   const [form, setForm] = useState({ title: '', body: '', tag: 'General', target_category: 'All', is_urgent: false })
   const [saving, setSaving] = useState(false)
   const [categories, setCategories] = useState<string[]>(['U9', 'U13', 'First Team'])
+  const TAGS = useConfigList('announcement_tags', FALLBACK_TAGS)
 
   useEffect(() => {
     fetchAnnouncements()
