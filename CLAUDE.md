@@ -20,7 +20,7 @@ Built for the club's daily operations AND as a Year 3 BSc dissertation project.
 - Push to GitHub main → Vercel auto-deploys (takes ~1 min)
 - Always run `npm run build` locally before pushing to catch errors
 - Environment variables are set in Vercel dashboard (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY)
-- **Before this deploys correctly, run `supabase/schema_v3_additions.sql` then `schema_v4_additions.sql` in the Supabase SQL Editor**, in that order (both additive — safe on the live DB). v3 adds expenses/income/inventory tables, fixes a profile role-escalation hole, widens payments.type, converts point_rules/global_awards category columns to arrays. v4 frees players.position / announcements.tag / inventory_items.condition from their old CHECK constraints (Club Settings → Dropdown Lists now owns those lists), seeds the new dropdown-list keys, and adds profiles.permissions for granular admin access.
+- **Before this deploys correctly, run `schema_v3_additions.sql`, then `schema_v4_additions.sql`, then `schema_v5_additions.sql` in the Supabase SQL Editor**, in that order (all additive — safe on the live DB). v3 adds expenses/income/inventory tables, fixes a profile role-escalation hole, widens payments.type, converts point_rules/global_awards category columns to arrays. v4 frees players.position / announcements.tag / inventory_items.condition from their old CHECK constraints (Club Settings → Dropdown Lists now owns those lists), seeds the new dropdown-list keys, and adds profiles.permissions for granular admin access. v5 adds the field_sheets table (Field Sheets feature).
 - Coach/parent invites (Staff & Parents page) send real emails via Supabase Auth — needs an email provider configured in the Supabase project (default Supabase SMTP is rate-limited; for real usage swap in a custom SMTP provider under Auth settings)
 
 ---
@@ -88,6 +88,7 @@ src/
       sessions/page.tsx     — Sessions list
       sessions/[id]/        — Session detail + attendance register
       sessions/new/         — Create session
+      drills/               — Field Sheets: drill worksheets (roster + custom columns), fillable in-app, Excel + printable PDF export
       attendance/           — Attendance overview
       analytics/            — Analytics dashboard (charts)
       leaderboard/          — Points leaderboard
@@ -158,6 +159,7 @@ supabase/
   schema_v2.sql             — Base schema (already applied — run once on a fresh project)
   schema_v3_additions.sql   — Additive migration: money/inventory tables, RBAC fix, multi-category (run in Supabase SQL Editor)
   schema_v4_additions.sql   — Additive migration: frees position/tag/condition columns for Dropdown Lists, seeds them, adds profiles.permissions (run AFTER v3)
+  schema_v5_additions.sql   — Additive migration: field_sheets table (run AFTER v4)
 ```
 
 ---
@@ -181,6 +183,7 @@ supabase/
 | `player_points` | Individual point awards — rule-based or one-off (`rule_id` null, `note` holds the reason) |
 | `global_awards` | Club-wide point events. `target_category` is `text[]`, same convention as `point_rules.category` |
 | `fan_card` | Parent-customisable card data |
+| `field_sheets` | On-field drill worksheets. `columns` (jsonb `[{key,label}]`) + `player_ids` (uuid[], ordered) define the grid; `data` (jsonb, `{player_id: {col_key: value}}`) holds the filled-in cells — one row per sheet, not a normalized cell table |
 
 ---
 
