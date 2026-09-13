@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useParams, useRouter } from 'next/navigation'
 import { formatDate, formatTime, categoryColor } from '@/lib/utils'
-import { ArrowLeft, QrCode, CheckCircle, XCircle, Clock, Users, Trash2 } from 'lucide-react'
+import { ArrowLeft, QrCode, CheckCircle, XCircle, Clock, Users, Trash2, Link2, Copy } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'react-hot-toast'
 
@@ -15,6 +15,7 @@ export default function SessionDetailPage() {
   const [attendance, setAttendance] = useState<any[]>([])
   const [allPlayers, setAllPlayers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [generatingLink, setGeneratingLink] = useState(false)
 
   useEffect(() => { fetchData() }, [params.id])
 
@@ -56,6 +57,24 @@ export default function SessionDetailPage() {
       })
     }
     fetchData()
+  }
+
+  async function generateScannerLink() {
+    setGeneratingLink(true)
+    const token = session.scan_token ?? crypto.randomUUID()
+    if (!session.scan_token) {
+      const { error } = await supabase.from('training_sessions').update({ scan_token: token }).eq('id', params.id as string)
+      if (error) { toast.error('Failed to generate link'); setGeneratingLink(false); return }
+      setSession((s: any) => ({ ...s, scan_token: token }))
+    }
+    const url = `${window.location.origin}/scan/live?session=${params.id}&token=${token}`
+    try {
+      await navigator.clipboard.writeText(url)
+      toast.success('Scanner link copied to clipboard!')
+    } catch {
+      toast.success('Scanner link generated')
+    }
+    setGeneratingLink(false)
   }
 
   async function deleteSession() {
@@ -113,11 +132,25 @@ export default function SessionDetailPage() {
                 <QrCode size={14}/> Scan QR
               </Link>
             )}
+            <button onClick={generateScannerLink} disabled={generatingLink} className="btn-secondary flex items-center gap-2 text-sm">
+              <Link2 size={14}/> {generatingLink ? 'Generating…' : session.scan_token ? 'Copy Scanner Link' : 'Generate Scanner Link'}
+            </button>
             <button onClick={deleteSession} className="btn-danger flex items-center gap-2 text-sm">
               <Trash2 size={14}/> Delete
             </button>
           </div>
         </div>
+        {session.scan_token && (
+          <div className="mt-4 pt-4 border-t border-white/5 flex items-center gap-3">
+            <Link2 size={14} className="text-teal-400 flex-shrink-0"/>
+            <code className="text-white/50 text-xs flex-1 truncate">
+              {typeof window !== 'undefined' ? `${window.location.origin}/scan/live?session=${session.id}&token=${session.scan_token}` : ''}
+            </code>
+            <button onClick={generateScannerLink} className="text-teal-400 hover:text-teal-300 flex-shrink-0" title="Copy link">
+              <Copy size={14}/>
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Attendance list */}

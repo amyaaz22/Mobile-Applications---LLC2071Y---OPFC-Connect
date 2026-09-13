@@ -1,25 +1,38 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { toast } from 'react-hot-toast'
 import { ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
 
+const FALLBACK_CATEGORIES = ['U9', 'U13', 'First Team']
+
 export default function NewPlayerPage() {
   const supabase = createClient()
   const router = useRouter()
   const [saving, setSaving] = useState(false)
   const [step, setStep] = useState(1)
+  const [categories, setCategories] = useState<string[]>(FALLBACK_CATEGORIES)
 
   const [player, setPlayer] = useState({
-    full_name: '', date_of_birth: '', category: 'U9', position: 'FWD',
+    full_name: '', date_of_birth: '', category: '', position: 'FWD',
     nationality: 'Mauritian', school: '', address: '', medical_notes: ''
   })
   const [guardian, setGuardian] = useState({
     full_name: '', relationship: 'Father', phone_primary: '',
     phone_secondary: '', email: ''
   })
+
+  useEffect(() => {
+    async function loadCategories() {
+      const { data } = await supabase.from('club_settings').select('value').eq('key', 'categories').single()
+      const cats = (data?.value as string[]) ?? FALLBACK_CATEGORIES
+      setCategories(cats)
+      setPlayer(p => ({ ...p, category: p.category || cats[0] || '' }))
+    }
+    loadCategories()
+  }, [])
 
   function setP(k: string, v: string) { setPlayer(p => ({ ...p, [k]: v })) }
   function setG(k: string, v: string) { setGuardian(g => ({ ...g, [k]: v })) }
@@ -76,9 +89,7 @@ export default function NewPlayerPage() {
               <div>
                 <label className="label mb-1.5 block">Category *</label>
                 <select className="input" value={player.category} onChange={e => setP('category', e.target.value)}>
-                  <option value="U9">U9</option>
-                  <option value="U13">U13</option>
-                  <option value="First Team">First Team</option>
+                  {categories.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div>

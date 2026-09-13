@@ -8,10 +8,11 @@ interface PassCardProps {
   qrUrl?: string
   logoUrl?: string
   clubName?: string
+  guardianPhone?: string
 }
 
 // Card Front — Club Pass
-export function PassCardFront({ player, logoUrl, clubName }: { player: Player; logoUrl?: string; clubName?: string }) {
+export function PassCardFront({ player, logoUrl, clubName, guardianPhone }: { player: Player; logoUrl?: string; clubName?: string; guardianPhone?: string }) {
   const season = `${new Date().getFullYear()}/${new Date().getFullYear() + 1}`
   const initials = player.full_name.split(' ').map((n: string) => n[0]).join('').slice(0, 3).toUpperCase()
 
@@ -46,10 +47,6 @@ export function PassCardFront({ player, logoUrl, clubName }: { player: Player; l
         </div>
       </div>
 
-      {/* Category badge — top right */}
-      <div style={{ position: 'absolute', top: 14, right: 14, background: 'rgba(78,198,198,0.15)', border: '1px solid rgba(78,198,198,0.5)', borderRadius: 20, padding: '4px 10px' }}>
-        <span style={{ color: '#4EC6C6', fontSize: 10, fontWeight: 800 }}>{player.category}</span>
-      </div>
 
       {/* Player photo — right side */}
       <div style={{ position: 'absolute', right: 16, top: 50, width: 112, height: 140, borderRadius: 10, overflow: 'hidden', border: '2px solid rgba(78,198,198,0.25)', background: 'rgba(78,198,198,0.05)' }}>
@@ -77,10 +74,12 @@ export function PassCardFront({ player, logoUrl, clubName }: { player: Player; l
           {player.full_name}
         </div>
 
-        {/* Nationality */}
-        <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 8, marginTop: 3 }}>
-          {player.nationality}
-        </div>
+        {/* Guardian phone */}
+        {guardianPhone && (
+          <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 8, marginTop: 3 }}>
+            Guardian: {guardianPhone}
+          </div>
+        )}
       </div>
 
       {/* Player code — bottom left */}
@@ -97,7 +96,7 @@ export function PassCardFront({ player, logoUrl, clubName }: { player: Player; l
 }
 
 // Card Back — QR only
-export function PassCardBack({ player, qrUrl }: { player: Player; qrUrl?: string }) {
+export function PassCardBack({ player, qrUrl, guardianPhone }: { player: Player; qrUrl?: string; guardianPhone?: string }) {
   return (
     <div style={{
       width: 340, height: 214,
@@ -124,9 +123,11 @@ export function PassCardBack({ player, qrUrl }: { player: Player; qrUrl?: string
         <div style={{ color: '#4EC6C6', fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 4 }}>Attendance Card</div>
         <div style={{ color: 'white', fontSize: 14, fontWeight: 800, textTransform: 'uppercase', lineHeight: 1.2 }}>{player.full_name}</div>
         <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 9, marginTop: 2, fontFamily: 'monospace' }}>{player.player_code}</div>
-        <div style={{ marginTop: 8, padding: '4px 10px', background: 'rgba(78,198,198,0.1)', border: '1px solid rgba(78,198,198,0.25)', borderRadius: 20, display: 'inline-block', width: 'fit-content' }}>
-          <span style={{ color: '#4EC6C6', fontSize: 9, fontWeight: 700 }}>{player.category}</span>
-        </div>
+        {guardianPhone && (
+          <div style={{ marginTop: 8, padding: '4px 10px', background: 'rgba(78,198,198,0.1)', border: '1px solid rgba(78,198,198,0.25)', borderRadius: 20, display: 'inline-block', width: 'fit-content' }}>
+            <span style={{ color: '#4EC6C6', fontSize: 9, fontWeight: 700 }}>Guardian: {guardianPhone}</span>
+          </div>
+        )}
         <div style={{ marginTop: 12, color: 'rgba(255,255,255,0.15)', fontSize: 7 }}>Oasis Pailles Football Club</div>
         <div style={{ color: 'rgba(78,198,198,0.3)', fontSize: 6, fontStyle: 'italic' }}>Omnis Tactus, Officium</div>
       </div>
@@ -137,7 +138,7 @@ export function PassCardBack({ player, qrUrl }: { player: Player; qrUrl?: string
 }
 
 // Full Pass Card with download
-export default function PassCard({ player, qrUrl, logoUrl, clubName }: PassCardProps) {
+export default function PassCard({ player, qrUrl, logoUrl, clubName, guardianPhone }: PassCardProps) {
   const frontRef = useRef<HTMLDivElement>(null)
   const backRef = useRef<HTMLDivElement>(null)
   const [downloading, setDownloading] = useState(false)
@@ -166,11 +167,11 @@ export default function PassCard({ player, qrUrl, logoUrl, clubName }: PassCardP
     <div className="flex flex-col items-center gap-3">
       <div>
         <p className="section-title mb-2 text-center text-xs">FRONT</p>
-        <div ref={frontRef}><PassCardFront player={player} logoUrl={logoUrl} clubName={clubName}/></div>
+        <div ref={frontRef}><PassCardFront player={player} logoUrl={logoUrl} clubName={clubName} guardianPhone={guardianPhone}/></div>
       </div>
       <div>
         <p className="section-title mb-2 text-center text-xs">BACK (QR)</p>
-        <div ref={backRef}><PassCardBack player={player} qrUrl={qrUrl}/></div>
+        <div ref={backRef}><PassCardBack player={player} qrUrl={qrUrl} guardianPhone={guardianPhone}/></div>
       </div>
       <button onClick={downloadCard} disabled={downloading} className="btn-primary flex items-center gap-2 w-full justify-center">
         <Download size={15}/>{downloading ? 'Generating…' : 'Download Pass Card (Front + Back)'}

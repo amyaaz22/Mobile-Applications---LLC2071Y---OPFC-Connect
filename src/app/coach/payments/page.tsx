@@ -9,10 +9,19 @@ export default function PaymentsPage() {
   const supabase = createClient()
   const [players, setPlayers] = useState<any[]>([])
   const [payments, setPayments] = useState<any[]>([])
+  const [monthlyFees, setMonthlyFees] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [month, setMonth] = useState(getCurrentMonth())
 
   useEffect(() => { fetchData() }, [month])
+  useEffect(() => {
+    supabase.from('club_settings').select('value').eq('key', 'fees').single()
+      .then(({ data }) => { if (data?.value) setMonthlyFees((data.value as any).monthly ?? {}) })
+  }, [])
+
+  function feeFor(category: string) {
+    return monthlyFees[category] ?? monthlyFeeAmount(category)
+  }
 
   async function fetchData() {
     setLoading(true)
@@ -35,7 +44,7 @@ export default function PaymentsPage() {
     } else {
       await supabase.from('payments').insert({
         player_id: playerId, type: 'monthly', month,
-        amount: monthlyFeeAmount(category), status: 'paid',
+        amount: feeFor(category), status: 'paid',
         confirmed_by: user?.id, confirmed_at: new Date().toISOString(),
       })
     }
@@ -106,7 +115,7 @@ export default function PaymentsPage() {
                         <div className="text-white/30 text-xs font-mono">{p.player_code}</div>
                       </td>
                       <td className="px-4 py-3 text-white/60 text-sm">{p.category}</td>
-                      <td className="px-4 py-3 text-white font-semibold text-sm">Rs {monthlyFeeAmount(p.category)}</td>
+                      <td className="px-4 py-3 text-white font-semibold text-sm">Rs {feeFor(p.category)}</td>
                       <td className="px-4 py-3">
                         <span className={`badge ${paymentStatusColor(status)}`}>{status}</span>
                       </td>

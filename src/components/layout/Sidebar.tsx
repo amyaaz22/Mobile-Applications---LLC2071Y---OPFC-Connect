@@ -1,5 +1,6 @@
 'use client'
 import Link from 'next/link'
+import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
@@ -45,6 +46,12 @@ export default function Sidebar({ role, userName }: { role: string; userName: st
   const supabase = createClient()
   const nav = role === 'coach' || role === 'admin' ? coachNav
     : role === 'parent' ? parentNav : playerNav
+  const [clubInfo, setClubInfo] = useState<{ logo_url?: string; name?: string }>({})
+
+  useEffect(() => {
+    supabase.from('club_settings').select('value').eq('key', 'club_info').single()
+      .then(({ data }) => { if (data?.value) setClubInfo(data.value as any) })
+  }, [])
 
   async function handleLogout() {
     await supabase.auth.signOut()
@@ -55,8 +62,12 @@ export default function Sidebar({ role, userName }: { role: string; userName: st
     <aside className="hidden md:flex flex-col w-64 h-screen bg-[#091520] border-r border-white/5 fixed left-0 top-0 z-40 overflow-hidden">
       <div className="p-5 border-b border-white/5 flex-shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-teal-400 flex items-center justify-center flex-shrink-0">
-            <span className="text-[#0D1B2A] font-black text-xs">OPFC</span>
+          <div className="w-10 h-10 rounded-full bg-teal-400 flex items-center justify-center flex-shrink-0 overflow-hidden">
+            {clubInfo.logo_url ? (
+              <img src={clubInfo.logo_url} alt="Club logo" className="w-full h-full object-contain p-1"/>
+            ) : (
+              <span className="text-[#0D1B2A] font-black text-xs">OPFC</span>
+            )}
           </div>
           <div>
             <div className="font-bold text-white text-sm">OPFC Connect</div>

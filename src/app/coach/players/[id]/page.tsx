@@ -28,10 +28,16 @@ export default function PlayerDetailPage() {
   const [saving, setSaving] = useState(false)
   const [qrUrl, setQrUrl] = useState('')
   const [attendance, setAttendance] = useState<any[]>([])
+  const [clubInfo, setClubInfo] = useState<{ logo_url?: string; name?: string }>({})
 
   useEffect(() => {
     fetchPlayer()
   }, [params.id])
+
+  useEffect(() => {
+    supabase.from('club_settings').select('value').eq('key', 'club_info').single()
+      .then(({ data }) => { if (data?.value) setClubInfo(data.value as any) })
+  }, [])
 
   async function fetchPlayer() {
     const { data: p } = await supabase
@@ -133,7 +139,8 @@ export default function PlayerDetailPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Pass Card (front + back PDF) */}
         <div className="flex flex-col items-center gap-4">
-          <PassCard player={player} qrUrl={qrUrl}/>
+          <PassCard player={player} qrUrl={qrUrl} logoUrl={clubInfo.logo_url} clubName={clubInfo.name}
+            guardianPhone={(Array.isArray(player.guardian) ? player.guardian[0] : player.guardian)?.phone_primary}/>
         </div>
 
         {/* Middle: Info + Stats */}

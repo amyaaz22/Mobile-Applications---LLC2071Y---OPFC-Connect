@@ -17,8 +17,13 @@ export default function EditPlayerPage() {
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [photoPreview, setPhotoPreview] = useState<string | null>(null)
+  const [categories, setCategories] = useState<string[]>(['U9', 'U13', 'First Team'])
 
   useEffect(() => { fetchPlayer() }, [params.id])
+  useEffect(() => {
+    supabase.from('club_settings').select('value').eq('key', 'categories').single()
+      .then(({ data }) => { if (data?.value) setCategories(data.value as string[]) })
+  }, [])
 
   async function fetchPlayer() {
     const { data } = await supabase
@@ -190,10 +195,9 @@ export default function EditPlayerPage() {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="label mb-1.5 block">Category</label>
-              <select className="input" value={player.category || 'U9'} onChange={e => setP('category', e.target.value)}>
-                <option value="U9">U9</option>
-                <option value="U13">U13</option>
-                <option value="First Team">First Team</option>
+              <select className="input" value={player.category || categories[0]} onChange={e => setP('category', e.target.value)}>
+                {(categories.includes(player.category) ? categories : [player.category, ...categories].filter(Boolean))
+                  .map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
             <div>
