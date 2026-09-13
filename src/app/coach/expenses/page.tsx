@@ -7,6 +7,7 @@ import { Plus, Trash2, Download, Upload, Receipt } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { useConfigList } from '@/hooks/useConfigList'
 import { usePermissionGuard } from '@/hooks/usePermissionGuard'
+import ReceiptLink from '@/components/ReceiptLink'
 
 const FALLBACK_CATEGORIES = ['Equipment', 'Referee Fees', 'Transport', 'Medical', 'Venue / Pitch Hire', 'Administration', 'Other']
 
@@ -24,6 +25,8 @@ export default function ExpensesPage() {
     date: new Date().toISOString().split('T')[0], category: 'Equipment',
     description: '', amount: '', paid_by: '', notes: '',
   })
+  const [receiptFile, setReceiptFile] = useState<File | null>(null)
+  const [uploadingReceipt, setUploadingReceipt] = useState(false)
 
   useEffect(() => { fetchExpenses() }, [])
 
@@ -38,11 +41,21 @@ export default function ExpensesPage() {
     if (!form.description.trim() || !form.amount || +form.amount <= 0) { toast.error('Description and amount are required'); return }
     setSaving(true)
     const { data: { user } } = await supabase.auth.getUser()
-    const { error } = await supabase.from('expenses').insert({ ...form, amount: +form.amount, created_by: user?.id })
+    let receipt_url: string | null = null
+    if (receiptFile) {
+      setUploadingReceipt(true)
+      const path = `expenses/${Date.now()}_${receiptFile.name.replace(/[^a-zA-Z0-9.\-_]/g, '_')}`
+      const { error: uploadError } = await supabase.storage.from('receipts').upload(path, receiptFile)
+      setUploadingReceipt(false)
+      if (uploadError) { toast.error('Receipt upload failed: ' + uploadError.message); setSaving(false); return }
+      receipt_url = path
+    }
+    const { error } = await supabase.from('expenses').insert({ ...form, amount: +form.amount, receipt_url, created_by: user?.id })
     setSaving(false)
     if (error) { toast.error('Failed to save'); return }
     toast.success('Expense recorded')
     setForm({ date: new Date().toISOString().split('T')[0], category: 'Equipment', description: '', amount: '', paid_by: '', notes: '' })
+    setReceiptFile(null)
     setShowForm(false)
     fetchExpenses()
   }
@@ -176,8 +189,13 @@ export default function ExpensesPage() {
             <label className="label mb-1.5 block">Notes</label>
             <input className="input" value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}/>
           </div>
+          <div>
+            <label className="label mb-1.5 block">Receipt (optional)</label>
+            <input type="file" accept="image/*,.pdf" className="input file:mr-3 file:btn-secondary file:border-0 file:py-1.5 file:px-3 file:text-xs"
+              onChange={e => setReceiptFile(e.target.files?.[0] ?? null)}/>
+          </div>
           <div className="flex gap-3">
-            <button onClick={addExpense} disabled={saving} className="btn-primary flex-1">{saving ? 'Saving…' : 'Save Expense'}</button>
+            <button onClick={addExpense} disabled={saving || uploadingReceipt} className="btn-primary flex-1">{uploadingReceipt ? 'Uploading receipt…' : saving ? 'Saving…' : 'Save Expense'}</button>
             <button onClick={() => setShowForm(false)} className="btn-secondary">Cancel</button>
           </div>
         </div>
@@ -208,7 +226,7 @@ export default function ExpensesPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-white/5">
-                  {['Date', 'Category', 'Description', 'Amount', 'Paid By', ''].map(h => (
+                  {['Date', 'Category', 'Description', 'Amount', 'Paid By', 'Receipt', ''].map(h => (
                     <th key={h} className="text-left px-4 py-3 text-xs font-bold text-white/30 uppercase">{h}</th>
                   ))}
                 </tr>
@@ -224,6 +242,7 @@ export default function ExpensesPage() {
                     </td>
                     <td className="px-4 py-3 text-white font-semibold text-sm whitespace-nowrap">Rs {e.amount.toLocaleString()}</td>
                     <td className="px-4 py-3 text-white/50 text-xs">{e.paid_by ?? '—'}</td>
+                    <td className="px-4 py-3">{e.receipt_url ? <ReceiptLink path={e.receipt_url}/> : <span className="text-white/20 text-xs">—</span>}</td>
                     <td className="px-4 py-3">
                       <button onClick={() => deleteExpense(e.id)} className="text-white/20 hover:text-red-400 transition-colors p-1">
                         <Trash2 size={14}/>

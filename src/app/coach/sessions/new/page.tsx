@@ -5,12 +5,14 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'react-hot-toast'
 import { ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
+import { useScopedCategories } from '@/hooks/useScopedCategories'
 
 export default function NewSessionPage() {
   const supabase = createClient()
   const router = useRouter()
   const [saving, setSaving] = useState(false)
   const [categories, setCategories] = useState<string[]>(['U9', 'U13', 'First Team'])
+  const { scopedCategories, visibleCategories } = useScopedCategories(categories)
 
   useEffect(() => {
     supabase.from('club_settings').select('value').eq('key', 'categories').single()
@@ -27,6 +29,11 @@ export default function NewSessionPage() {
     venue: 'Morcellement Raffray Football Ground',
     notes: '',
   })
+
+  useEffect(() => {
+    // A coach scoped to specific categories can't create an "All" session
+    if (scopedCategories.length) setForm(f => f.category === 'All' ? { ...f, category: scopedCategories[0] } : f)
+  }, [scopedCategories])
 
   function set(key: string, val: any) { setForm(f => ({ ...f, [key]: val })) }
 
@@ -67,8 +74,8 @@ export default function NewSessionPage() {
           <div>
             <label className="label mb-1.5 block">Category</label>
             <select className="input" value={form.category} onChange={e => set('category', e.target.value)}>
-              <option value="All">All</option>
-              {categories.map(c => <option key={c} value={c}>{c}</option>)}
+              {!scopedCategories.length && <option value="All">All</option>}
+              {visibleCategories.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
         </div>

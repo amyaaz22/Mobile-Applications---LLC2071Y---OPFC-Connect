@@ -10,6 +10,7 @@ import { PassCardFront, PassCardBack } from '@/components/cards/PassCard'
 import { toast } from 'react-hot-toast'
 import * as XLSX from 'xlsx'
 import QRCode from 'qrcode'
+import { useScopedCategories } from '@/hooks/useScopedCategories'
 
 const FALLBACK_CATEGORIES = ['U9', 'U13', 'First Team']
 
@@ -21,7 +22,7 @@ export default function PlayersPage() {
   const [category, setCategory] = useState('All')
   const [viewMode, setViewMode] = useState<'list' | 'cards'>('list')
   const [categories, setCategories] = useState<string[]>(FALLBACK_CATEGORIES)
-  const [scopedCategories, setScopedCategories] = useState<string[]>([])
+  const { scopedCategories, visibleCategories } = useScopedCategories(categories)
   const [exporting, setExporting] = useState(false)
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null)
   const [renderPlayer, setRenderPlayer] = useState<any>(null)
@@ -33,16 +34,7 @@ export default function PlayersPage() {
       .then(({ data }) => { if (data?.value) setCategories(data.value as string[]) })
     supabase.from('club_settings').select('value').eq('key', 'club_info').single()
       .then(({ data }) => { if (data?.value) setClubInfo(data.value as any) })
-    // Soft UI scoping: if this coach is limited to specific categories, only
-    // offer those here. Not an RLS boundary — see CLAUDE.md.
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) return
-      supabase.from('profiles').select('*').eq('id', user.id).single()
-        .then(({ data }) => { if (data?.assigned_categories?.length) setScopedCategories(data.assigned_categories) })
-    })
   }, [])
-
-  const visibleCategories = scopedCategories.length ? scopedCategories : categories
 
   async function exportToExcel() {
     setExporting(true)

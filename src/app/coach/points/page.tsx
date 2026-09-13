@@ -3,9 +3,10 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'react-hot-toast'
 import { Plus, Trash2, Star, Gift, Sparkles } from 'lucide-react'
+import { useScopedCategories } from '@/hooks/useScopedCategories'
 
-function CategoryChips({ categories, selected, onToggle }: { categories: string[]; selected: string[]; onToggle: (c: string) => void }) {
-  const allCats = ['All', ...categories]
+function CategoryChips({ categories, selected, onToggle, includeAll = true }: { categories: string[]; selected: string[]; onToggle: (c: string) => void; includeAll?: boolean }) {
+  const allCats = includeAll ? ['All', ...categories] : categories
   return (
     <div className="flex gap-1.5 flex-wrap">
       {allCats.map(c => (
@@ -46,10 +47,12 @@ export default function PointsPage() {
   const [showGlobalForm, setShowGlobalForm] = useState(false)
 
   const [categories, setCategories] = useState<string[]>([])
+  const { visibleCategories, scopedCategories, inScope } = useScopedCategories(categories)
 
   useEffect(() => {
     loadAll()
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inScope])
 
   async function loadAll() {
     setLoading(true)
@@ -67,8 +70,8 @@ export default function PointsPage() {
       supabase.from('club_settings').select('value').eq('key', 'categories').single(),
     ])
     setRules(r ?? [])
-    setPlayers(p ?? [])
-    setSessions(s ?? [])
+    setPlayers((p ?? []).filter(pl => inScope(pl.category)))
+    setSessions((s ?? []).filter(sess => inScope(sess.category)))
     setGlobalAwards(g ?? [])
     setCategories((settings?.value as string[]) ?? [])
     setLoading(false)
@@ -202,7 +205,7 @@ export default function PointsPage() {
               </div>
               <div>
                 <label className="label mb-1.5 block">Applies to</label>
-                <CategoryChips categories={categories} selected={newRule.category}
+                <CategoryChips categories={visibleCategories} includeAll={!scopedCategories.length} selected={newRule.category}
                   onToggle={c => toggleCategory(newRule.category, v => setNewRule(n => ({ ...n, category: v })), c)}/>
               </div>
               <div className="flex gap-2">
@@ -254,7 +257,7 @@ export default function PointsPage() {
                 </div>
                 <div>
                   <label className="label mb-1.5 block">Group(s)</label>
-                  <CategoryChips categories={categories} selected={globalForm.target_category}
+                  <CategoryChips categories={visibleCategories} includeAll={!scopedCategories.length} selected={globalForm.target_category}
                     onToggle={c => toggleCategory(globalForm.target_category, v => setGlobalForm(g => ({ ...g, target_category: v })), c)}/>
                 </div>
                 <div className="flex gap-2">

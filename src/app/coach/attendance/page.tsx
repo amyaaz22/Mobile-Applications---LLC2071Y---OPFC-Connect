@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { formatDate, categoryColor } from '@/lib/utils'
 import { BarChart3, Download } from 'lucide-react'
+import { useScopedCategories } from '@/hooks/useScopedCategories'
 
 export default function AttendancePage() {
   const supabase = createClient()
@@ -11,18 +12,21 @@ export default function AttendancePage() {
   const [attendance, setAttendance] = useState<any[]>([])
   const [allPlayers, setAllPlayers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const { inScope } = useScopedCategories([])
 
   useEffect(() => {
     async function init() {
       const { data: s } = await supabase.from('training_sessions').select('*').order('date', { ascending: false }).limit(20)
       const { data: p } = await supabase.from('players').select('id, full_name, player_code, category').eq('is_active', true).order('full_name')
-      setSessions(s ?? [])
-      setAllPlayers(p ?? [])
-      if (s?.length) { setSelected(s[0].id); fetchAttendance(s[0].id) }
+      const scopedSessions = (s ?? []).filter(sess => inScope(sess.category))
+      setSessions(scopedSessions)
+      setAllPlayers((p ?? []).filter(pl => inScope(pl.category)))
+      if (scopedSessions.length) { setSelected(scopedSessions[0].id); fetchAttendance(scopedSessions[0].id) }
       setLoading(false)
     }
     init()
-  }, [])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inScope])
 
   async function fetchAttendance(sessionId: string) {
     const { data } = await supabase.from('attendance').select('*, player:players(full_name, player_code, category)').eq('session_id', sessionId)

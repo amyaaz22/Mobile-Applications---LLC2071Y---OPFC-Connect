@@ -2,35 +2,38 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
+import { hasPermission, PermissionArea } from '@/lib/permissions'
 import { Home, Users, CalendarDays, BarChart3, QrCode, CreditCard, PiggyBank, TrendingUp } from 'lucide-react'
 
-const coachItems = [
+const coachItems: { href: string; label: string; icon: typeof Home; area?: PermissionArea }[] = [
   { href: '/coach', label: 'Home', icon: Home },
   { href: '/coach/players', label: 'Players', icon: Users },
   { href: '/scan', label: 'Scan', icon: QrCode },
   { href: '/coach/analytics', label: 'Analytics', icon: TrendingUp },
-  { href: '/coach/finance', label: 'Finance', icon: PiggyBank },
+  { href: '/coach/finance', label: 'Finance', icon: PiggyBank, area: 'finance' },
 ]
 
-const parentItems = [
+const parentItems: typeof coachItems = [
   { href: '/parent', label: 'Home', icon: Home },
   { href: '/parent/card', label: 'Card', icon: CreditCard },
   { href: '/parent/schedule', label: 'Schedule', icon: CalendarDays },
   { href: '/parent/attendance', label: 'Attendance', icon: BarChart3 },
 ]
 
-const playerItems = [
+const playerItems: typeof coachItems = [
   { href: '/player', label: 'Home', icon: Home },
   { href: '/player/card', label: 'My Card', icon: CreditCard },
   { href: '/player/schedule', label: 'Schedule', icon: CalendarDays },
   { href: '/player/attendance', label: 'Attendance', icon: BarChart3 },
 ]
 
-export default function MobileNav({ role }: { role: string }) {
+export default function MobileNav({ role, permissions }: { role: string; permissions?: string[] | null }) {
   const pathname = usePathname()
-  const items = role === 'coach' || role === 'admin' ? coachItems
+  const profile = { role, permissions }
+  const items = (role === 'coach' || role === 'admin' ? coachItems
     : role === 'parent' ? parentItems
     : playerItems
+  ).filter(item => !item.area || role !== 'admin' || hasPermission(profile, item.area))
 
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#091520]/95 backdrop-blur-lg border-t border-white/5">

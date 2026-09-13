@@ -5,6 +5,7 @@ import { formatDate } from '@/lib/utils'
 import { toast } from 'react-hot-toast'
 import { Plus, Trash2, Megaphone } from 'lucide-react'
 import { useConfigList } from '@/hooks/useConfigList'
+import { useScopedCategories } from '@/hooks/useScopedCategories'
 
 const FALLBACK_TAGS = ['General', 'Admin', 'Event', 'Shop', 'Urgent']
 
@@ -15,6 +16,7 @@ export default function AnnouncementsPage() {
   const [form, setForm] = useState({ title: '', body: '', tag: 'General', target_category: 'All', is_urgent: false })
   const [saving, setSaving] = useState(false)
   const [categories, setCategories] = useState<string[]>(['U9', 'U13', 'First Team'])
+  const { visibleCategories, scopedCategories } = useScopedCategories(categories)
   const TAGS = useConfigList('announcement_tags', FALLBACK_TAGS)
 
   useEffect(() => {
@@ -22,6 +24,11 @@ export default function AnnouncementsPage() {
     supabase.from('club_settings').select('value').eq('key', 'categories').single()
       .then(({ data }) => { if (data?.value) setCategories(data.value as string[]) })
   }, [])
+
+  useEffect(() => {
+    // A coach scoped to specific categories can't post an "All" announcement
+    if (scopedCategories.length) setForm(f => f.target_category === 'All' ? { ...f, target_category: scopedCategories[0] } : f)
+  }, [scopedCategories])
 
   async function fetchAnnouncements() {
     const { data } = await supabase.from('announcements').select('*').order('created_at', { ascending: false })
@@ -82,8 +89,8 @@ export default function AnnouncementsPage() {
             <div>
               <label className="label mb-1.5 block">Target</label>
               <select className="input" value={form.target_category} onChange={e => setForm(f => ({ ...f, target_category: e.target.value }))}>
-                <option value="All">All</option>
-                {categories.map(c => <option key={c} value={c}>{c}</option>)}
+                {!scopedCategories.length && <option value="All">All</option>}
+                {visibleCategories.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
           </div>

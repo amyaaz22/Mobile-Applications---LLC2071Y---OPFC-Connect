@@ -20,7 +20,7 @@ Built for the club's daily operations AND as a Year 3 BSc dissertation project.
 - Push to GitHub main → Vercel auto-deploys (takes ~1 min)
 - Always run `npm run build` locally before pushing to catch errors
 - Environment variables are set in Vercel dashboard (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY)
-- **Before this deploys correctly, run `schema_v3_additions.sql`, then `schema_v4_additions.sql`, then `schema_v5_additions.sql` in the Supabase SQL Editor**, in that order (all additive — safe on the live DB). v3 adds expenses/income/inventory tables, fixes a profile role-escalation hole, widens payments.type, converts point_rules/global_awards category columns to arrays. v4 frees players.position / announcements.tag / inventory_items.condition from their old CHECK constraints (Club Settings → Dropdown Lists now owns those lists), seeds the new dropdown-list keys, and adds profiles.permissions for granular admin access. v5 adds the field_sheets table (Field Sheets feature).
+- **Before this deploys correctly, run `schema_v3_additions.sql` through `schema_v6_additions.sql` in the Supabase SQL Editor**, in order (all additive — safe on the live DB, and all already applied on the live project as of this writing). v3 adds expenses/income/inventory tables, fixes a profile role-escalation hole, widens payments.type, converts point_rules/global_awards category columns to arrays. v4 frees players.position / announcements.tag / inventory_items.condition from their old CHECK constraints (Club Settings → Dropdown Lists now owns those lists), seeds the new dropdown-list keys, and adds profiles.permissions for granular admin access. v5 adds the field_sheets table (Field Sheets feature). v6 adds payments.reference (optional transaction ref), income.receipt_url, a private `receipts` storage bucket for expense/income attachments, and seeds categories/fees/club_info if missing.
 - Coach/parent invites (Staff & Parents page) send real emails via Supabase Auth — needs an email provider configured in the Supabase project (default Supabase SMTP is rate-limited; for real usage swap in a custom SMTP provider under Auth settings)
 
 ---
@@ -68,8 +68,8 @@ Built for the club's daily operations AND as a Year 3 BSc dissertation project.
 
 **RBAC notes (relevant to the dissertation writeup):**
 - `profiles.role` is protected by a `BEFORE UPDATE` trigger (`protect_profile_role`, added in `schema_v3_additions.sql`) — a signed-in user cannot grant themselves a higher role by calling `supabase.from('profiles').update({ role: 'admin' })` directly; only an existing admin's update is honored. This closed a real self-escalation hole that existed in `schema_v2.sql`.
-- Every `players`/`sessions`/`payments`/etc. RLS policy still grants identical power to any `coach`. `profiles.assigned_categories` (text[]) lets an admin scope a coach to specific categories from the Staff page. It's wired into the **Players list** (filter chips + query) as a UI-level convenience only — every other coach-facing screen and every RLS policy still grants full access regardless of this field. Extending the same filter elsewhere, or promoting it to a real RLS boundary, is future work — don't describe it as a security guarantee until it is one.
-- `profiles.permissions` (text[], v4) narrows a specific **admin** account instead of all-or-nothing — see `src/lib/permissions.ts` for the area list (`finance`, `inventory`, `settings`, `staff`) and `hasPermission()`. Null/empty = unrestricted (the default — every admin created via the old manual-SQL bootstrap is unrestricted). Only an *unrestricted* admin can change anyone's `role` or `permissions` (enforced by the same `protect_profile_role` trigger, extended in v4) — a narrowed admin cannot grant itself more access. `coach` accounts are untouched by this; it's purely an admin-vs-admin mechanism, separate from `assigned_categories`. Enforced client-side via `usePermissionGuard(area)` at the top of each gated page (`settings`, `finance`, `expenses`, `income`, `inventory`, `staff`) plus a matching filter in `Sidebar.tsx` — same "100% client-side auth" caveat as everything else in this section.
+- Every `players`/`sessions`/`payments`/etc. RLS policy still grants identical power to any `coach`. `profiles.assigned_categories` (text[]) lets an admin scope a coach to specific categories from the Staff page. It's a UI-level convenience only, via `useScopedCategories()` (`src/hooks/useScopedCategories.ts`) — wired into **Players, Sessions (list + create), Attendance, Points (rules, global awards, player/session pickers), and Announcements** (filter chips/lists + narrowed "create" dropdowns, with "All" hidden once scoped). Every RLS policy still grants full access regardless of this field — promoting it to a real RLS boundary is future work, don't describe it as a security guarantee until it is one.
+- `profiles.permissions` (text[], v4) narrows a specific **admin** account instead of all-or-nothing — see `src/lib/permissions.ts` for the area list (`finance`, `inventory`, `settings`, `staff`) and `hasPermission()`. Null/empty = unrestricted (the default — every admin created via the old manual-SQL bootstrap is unrestricted). Only an *unrestricted* admin can change anyone's `role` or `permissions` (enforced by the same `protect_profile_role` trigger, extended in v4) — a narrowed admin cannot grant itself more access. `coach` accounts are untouched by this; it's purely an admin-vs-admin mechanism, separate from `assigned_categories`. Enforced client-side via `usePermissionGuard(area)` at the top of each gated page (`settings`, `finance`, `expenses`, `income`, `inventory`, `staff`) plus a matching filter in both `Sidebar.tsx` and `MobileNav.tsx`.
 
 ---
 
@@ -160,6 +160,7 @@ supabase/
   schema_v3_additions.sql   — Additive migration: money/inventory tables, RBAC fix, multi-category (run in Supabase SQL Editor)
   schema_v4_additions.sql   — Additive migration: frees position/tag/condition columns for Dropdown Lists, seeds them, adds profiles.permissions (run AFTER v3)
   schema_v5_additions.sql   — Additive migration: field_sheets table (run AFTER v4)
+  schema_v6_additions.sql   — Additive migration: payments.reference, income.receipt_url, private `receipts` storage bucket, seeds categories/fees/club_info if missing (run AFTER v5)
 ```
 
 ---
@@ -173,9 +174,9 @@ supabase/
 | `player_stats` | Monthly ratings PAC/SHO/PAS/DRI/DEF/PHY + OVR (generated) |
 | `training_sessions` | Sessions with scan_token for live scanner |
 | `attendance` | QR scan records |
-| `payments` | `type` in `entry` / `monthly` / `other`; has `method` column. Entry-fee row auto-created (status `pending`) on player registration and import |
-| `expenses` | Club spending: referee fees, transport, equipment, etc. |
-| `income` | Donations, sponsorships, fundraising — anything that isn't a player fee |
+| `payments` | `type` in `entry` / `monthly` / `other`; has `method` column and an optional `reference` (bank transfer ref / Juice transaction ID / etc, freeform, never required). Entry-fee row auto-created (status `pending`) on player registration and import |
+| `expenses` | Club spending: referee fees, transport, equipment, etc. `receipt_url` (optional) is an object path in the private `receipts` storage bucket, not a public URL — view via `ReceiptLink` (signed URL) |
+| `income` | Donations, sponsorships, fundraising — anything that isn't a player fee. Same optional `receipt_url` convention as `expenses` |
 | `inventory_items` | Kit/equipment: quantity, condition, `min_stock` drives the low-stock flag, optional `assigned_to` player |
 | `announcements` | Club-wide messages |
 | `club_settings` | Dynamic config: categories (plain string array, e.g. `["U9","U13"]` — never `{name: ...}` objects), fees, club_info (logo_url) |
@@ -188,21 +189,21 @@ supabase/
 ---
 
 ## Current Known Issues / TODO
-Also done since the last update: every dropdown that was hardcoded (positions,
-guardian relationships, announcement tags, payment methods, expense/income/
-inventory categories, inventory conditions) is now editable from Club Settings
-→ Dropdown Lists, with no code change needed; native `<select>` popups no
-longer render white-on-white in the dark theme; granular admin permissions
-(`profiles.permissions`, `src/lib/permissions.ts`) let the primary admin
-narrow a second admin account to specific areas instead of all-or-nothing;
-and the players list has a "Download All Cards" button that bundles every
-active player's pass card into one PDF.
+Also done since the last update: `assigned_categories` coach scoping now
+extends beyond the Players list to Sessions (list + create), Attendance,
+Points, and Announcements via the shared `useScopedCategories()` hook;
+`MobileNav.tsx`'s bottom-nav icons are now filtered by `permissions`, same as
+`Sidebar.tsx`; payments have an optional `reference` field (bank transfer
+ref / Juice transaction ID / etc — never required, any method) shown in the
+Record Payment modal, ledger, and Excel export; expenses and income both
+support an optional receipt/attachment upload (private `receipts` storage
+bucket, viewed via a short-lived signed URL through `ReceiptLink`); and the
+production `club_settings` table (which had no `categories`/`fees`/`club_info`
+rows at all) now has sane defaults seeded.
 
-- [ ] `assigned_categories` coach scoping and `permissions` admin scoping are each wired into a handful of pages (Players list; Settings/Finance/Expenses/Income/Inventory/Staff respectively) — extend elsewhere or promote to a real RLS boundary if either needs to feel fully consistent or become a hard guarantee
-- [ ] `MobileNav.tsx`'s bottom-nav icons aren't filtered by `permissions` yet (the pages themselves still redirect correctly via `usePermissionGuard`, so this is a UX nicety, not a security gap)
-- [ ] Coach/parent invites need a real email provider configured in Supabase Auth (default SMTP is rate-limited) — see Deployment section
-- [ ] No payment gateway yet (Stripe / MCB Juice) — payments are still manually recorded
-- [ ] `expenses`/`income` have no receipt/attachment upload yet (`receipt_url` column exists on `expenses`, unused)
+- [ ] `assigned_categories` coach scoping and `permissions` admin scoping are still a UI-level convenience, not an RLS boundary — every `players`/`sessions`/`payments`/etc. policy still grants full access to any `coach` regardless of `assigned_categories`. Promoting either to a real RLS boundary is future work — don't describe it as a security guarantee until it is one.
+- [ ] Coach/parent invites need a real email provider configured in Supabase Auth (default SMTP is rate-limited) — see Deployment section. This needs a human decision (which provider — Resend/SendGrid/etc — and its API credentials), not something to pick unilaterally.
+- [ ] No payment gateway yet (Stripe / MCB Juice) — payments are still manually recorded (now with an optional transaction reference field, see above, but no actual processing/reconciliation)
 
 ---
 
