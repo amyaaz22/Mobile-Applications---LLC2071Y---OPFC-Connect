@@ -3,35 +3,77 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import QRScanner from '@/components/scanner/QRScanner'
 import { formatDate } from '@/lib/utils'
-import { CalendarDays, CheckCircle, Users } from 'lucide-react'
+import { CalendarDays, CheckCircle, Wifi, WifiOff, Download } from 'lucide-react'
 import Link from 'next/link'
+import { usePWA } from '@/hooks/usePWA'
 
 export default function ScanPage() {
   const supabase = createClient()
+  const { isOnline, isInstallable, installApp, queueOfflineAttendance, getOfflineQueue } = usePWA()
   const [sessions, setSessions] = useState<any[]>([])
   const [selectedSession, setSelectedSession] = useState<any>(null)
   const [scanLog, setScanLog] = useState<any[]>([])
   const [scanCount, setScanCount] = useState(0)
+  const [offlineQueue, setOfflineQueue] = useState<any[]>([])
+  const [syncing, setSyncing] = useState(false)
 
   useEffect(() => {
-    async function fetchSessions() {
-      const today = new Date().toISOString().split('T')[0]
-      const { data } = await supabase
-        .from('training_sessions')
-        .select('*')
-        .gte('date', today)
-        .lte('date', new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0])
-        .order('date')
-      setSessions(data ?? [])
-      if (data?.length === 1) setSelectedSession(data[0])
-    }
     fetchSessions()
+    loadOfflineQueue()
   }, [])
+
+  // Re-check offline queue when coming back online
+  useEffect(() => {
+    if (isOnline) {
+      loadOfflineQueue()
+      syncOfflineRecords()
+    }
+  }, [isOnline])
+
+  async function fetchSessions() {
+    const today = new Date().toISOString().split('T')[0]
+    const { data } = await supabase
+      .from('training_sessions')
+      .select('*')
+      .gte('date', today)
+      .lte('date', new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0])
+      .order('date')
+    setSessions(data ?? [])
+    if (data?.length === 1) setSelectedSession(data[0])
+  }
+
+  async function loadOfflineQueue() {
+    const queue = await getOfflineQueue()
+    setOfflineQueue(queue)
+  }
+
+  async function syncOfflineRecords() {
+    if (!isOnline) return
+    const queue = await getOfflineQueue()
+    if (!queue.length) return
+
+    setSyncing(true)
+    let synced = 0
+    for (const record of queue) {
+      try {
+        const res = await fetch('/api/attendance/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(record),
+        })
+        if (res.ok) synced++
+      } catch { /* retry later */ }
+    }
+    if (synced > 0) {
+      await loadOfflineQueue()
+    }
+    setSyncing(false)
+  }
 
   async function handleScan(playerId: string): Promise<{ success: boolean; playerName: string; message?: string }> {
     if (!selectedSession) return { success: false, playerName: 'No session selected' }
 
-    // Get player
+    // Get player info (from cache if offline)
     const { data: player } = await supabase
       .from('players')
       .select('id, full_name, player_code, category')
@@ -40,7 +82,26 @@ export default function ScanPage() {
 
     if (!player) return { success: false, playerName: 'Player not found', message: `ID: ${playerId}` }
 
-    // Check if already logged
+    const record = {
+      id: `${selectedSession.id}-${playerId}-${Date.now()}`,
+      session_id: selectedSession.id,
+      player_id: playerId,
+      player_name: player.full_name,
+      status: 'present' as const,
+      scanned_at: new Date().toISOString(),
+    }
+
+    if (!isOnline) {
+      // Queue for later sync
+      await queueOfflineAttendance(record)
+      setScanCount(c => c + 1)
+      setScanLog(log => [{ player, time: new Date(), offline: true }, ...log.slice(0, 19)])
+      await loadOfflineQueue()
+      return { success: true, playerName: player.full_name, message: '⚡ Saved offline — will sync when connected' }
+    }
+
+    // Online — save directly
+    const { data: { user } } = await supabase.auth.getUser()
     const { data: existing } = await supabase
       .from('attendance')
       .select('id')
@@ -50,8 +111,6 @@ export default function ScanPage() {
 
     if (existing) return { success: false, playerName: player.full_name, message: 'Already checked in' }
 
-    // Record attendance
-    const { data: { user } } = await supabase.auth.getUser()
     const { error } = await supabase.from('attendance').insert({
       session_id: selectedSession.id,
       player_id: playerId,
@@ -63,20 +122,72 @@ export default function ScanPage() {
     if (error) return { success: false, playerName: player.full_name, message: 'Database error' }
 
     setScanCount(c => c + 1)
-    setScanLog(log => [{ player, time: new Date() }, ...log.slice(0, 19)])
+    setScanLog(log => [{ player, time: new Date(), offline: false }, ...log.slice(0, 19)])
     return { success: true, playerName: player.full_name }
   }
 
   return (
-    <div className="min-h-screen bg-navy-gradient p-4 max-w-lg mx-auto">
+    <div className="min-h-screen p-4 max-w-lg mx-auto" style={{ background: '#0D1B2A' }}>
       {/* Header */}
-      <div className="flex items-center justify-between mb-6 pt-2">
+      <div className="flex items-center justify-between mb-4 pt-2">
         <div>
           <h1 className="text-2xl font-black font-condensed text-white">QR Scanner</h1>
           <p className="text-white/30 text-sm">Attendance Check-in</p>
         </div>
-        <Link href="/coach" className="text-teal-400 text-sm hover:underline" onClick={() => window.location.href = '/coach'}>← Dashboard</Link>
+        <div className="flex items-center gap-2">
+          {/* Online/offline indicator */}
+          <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold
+            ${isOnline ? 'bg-green-500/10 text-green-400 border border-green-500/20' : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'}`}>
+            {isOnline ? <Wifi size={12}/> : <WifiOff size={12}/>}
+            {isOnline ? 'Online' : 'Offline'}
+          </div>
+          <button onClick={() => window.location.href = '/coach'} className="text-teal-400 text-sm hover:underline">← Dashboard</button>
+        </div>
       </div>
+
+      {/* Offline banner */}
+      {!isOnline && (
+        <div className="card p-3 mb-4 border-amber-500/20 bg-amber-500/5">
+          <div className="flex items-start gap-2">
+            <WifiOff size={14} className="text-amber-400 flex-shrink-0 mt-0.5"/>
+            <div>
+              <p className="text-amber-400 text-xs font-bold">Working Offline</p>
+              <p className="text-amber-400/70 text-xs mt-0.5">Scans are saved locally and will sync automatically when you reconnect.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Offline queue indicator */}
+      {offlineQueue.length > 0 && isOnline && (
+        <div className="card p-3 mb-4 border-teal-400/20 bg-teal-400/5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CheckCircle size={14} className="text-teal-400"/>
+              <p className="text-teal-400 text-xs font-bold">{offlineQueue.length} offline scans pending sync</p>
+            </div>
+            <button onClick={syncOfflineRecords} disabled={syncing}
+              className="text-teal-400 text-xs hover:underline">
+              {syncing ? 'Syncing…' : 'Sync now'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Install PWA */}
+      {isInstallable && (
+        <div className="card p-3 mb-4 border-purple-500/20 bg-purple-500/5">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-purple-300 text-xs font-bold">Install OPFC Connect</p>
+              <p className="text-purple-300/60 text-xs">Add to home screen for offline use</p>
+            </div>
+            <button onClick={installApp} className="flex items-center gap-1.5 text-purple-300 text-xs border border-purple-500/30 px-3 py-1.5 rounded-lg hover:bg-purple-500/10">
+              <Download size={12}/> Install
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Session selector */}
       <div className="card p-4 mb-5">
@@ -95,7 +206,7 @@ export default function ScanPage() {
                     ? 'bg-teal-400/10 border-teal-400/30 text-teal-400'
                     : 'border-white/10 text-white/60 hover:border-white/20 hover:text-white'}`}>
                 <div className="font-semibold text-sm">{s.title}</div>
-                <div className="text-xs mt-0.5 opacity-60">{formatDate(s.date)} · {s.time_start.slice(0,5)} · {s.category}</div>
+                <div className="text-xs mt-0.5 opacity-60">{formatDate(s.date)} · {s.time_start?.slice(0,5)} · {s.category}</div>
               </button>
             ))}
           </div>
@@ -125,10 +236,11 @@ export default function ScanPage() {
               <div className="space-y-2 max-h-48 overflow-y-auto">
                 {scanLog.map((entry, i) => (
                   <div key={i} className="flex items-center gap-3 py-1.5">
-                    <CheckCircle size={14} className="text-green-400 flex-shrink-0"/>
+                    <CheckCircle size={14} className={entry.offline ? 'text-amber-400 flex-shrink-0' : 'text-green-400 flex-shrink-0'}/>
                     <div className="flex-1">
                       <span className="text-white text-sm font-medium">{entry.player.full_name}</span>
                       <span className="text-white/30 text-xs ml-2">{entry.player.player_code}</span>
+                      {entry.offline && <span className="text-amber-400/70 text-xs ml-2">offline</span>}
                     </div>
                     <span className="text-white/30 text-xs">
                       {entry.time.toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })}
