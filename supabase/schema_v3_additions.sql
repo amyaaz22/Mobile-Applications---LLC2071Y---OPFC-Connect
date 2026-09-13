@@ -52,16 +52,31 @@ update public.club_settings
     and jsonb_typeof(value->0) = 'object';
 
 -- ── POINT RULES / GLOBAL AWARDS: multi-category targeting ───────
-alter table public.point_rules alter column category drop default;
-alter table public.point_rules alter column category type text[] using (
-  case when category is null or category = 'All' then array['All'] else array[category] end
-);
-alter table public.point_rules alter column category set default array['All'];
+-- Guarded so this whole file is safe to re-run even if a previous attempt
+-- got partway through (each block skips itself once its column is already text[]).
+do $$
+begin
+  if (select data_type from information_schema.columns
+      where table_schema = 'public' and table_name = 'point_rules' and column_name = 'category') <> 'ARRAY' then
+    alter table public.point_rules alter column category drop default;
+    alter table public.point_rules alter column category type text[] using (
+      case when category is null or category = 'All' then array['All'] else array[category] end
+    );
+    alter table public.point_rules alter column category set default array['All'];
+  end if;
+end $$;
 
-alter table public.global_awards alter column target_category type text[] using (
-  case when target_category is null or target_category = 'All' then array['All'] else array[target_category] end
-);
-alter table public.global_awards alter column target_category set default array['All'];
+do $$
+begin
+  if (select data_type from information_schema.columns
+      where table_schema = 'public' and table_name = 'global_awards' and column_name = 'target_category') <> 'ARRAY' then
+    alter table public.global_awards alter column target_category drop default;
+    alter table public.global_awards alter column target_category type text[] using (
+      case when target_category is null or target_category = 'All' then array['All'] else array[target_category] end
+    );
+    alter table public.global_awards alter column target_category set default array['All'];
+  end if;
+end $$;
 
 -- ── PAYMENTS: flexible types + method ────────────────────────────
 alter table public.payments drop constraint if exists payments_type_check;
