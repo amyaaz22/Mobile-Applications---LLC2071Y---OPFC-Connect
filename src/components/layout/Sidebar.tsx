@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
+import { hasPermission, PermissionArea } from '@/lib/permissions'
 import {
   Users, CreditCard, CalendarDays, BarChart3, Megaphone,
   Wallet, LogOut, QrCode, Home, ChevronRight, UserCircle,
@@ -11,7 +12,7 @@ import {
   HeartHandshake, Package, ShieldCheck
 } from 'lucide-react'
 
-const coachNav = [
+const coachNav: { href: string; label: string; icon: JSX.Element; area?: PermissionArea }[] = [
   { href: '/coach', label: 'Dashboard', icon: <Home size={18}/> },
   { href: '/coach/players', label: 'Players', icon: <Users size={18}/> },
   { href: '/coach/sessions', label: 'Sessions', icon: <CalendarDays size={18}/> },
@@ -20,21 +21,21 @@ const coachNav = [
   { href: '/coach/leaderboard', label: 'Leaderboard', icon: <Trophy size={18}/> },
   { href: '/coach/points', label: 'Points', icon: <Star size={18}/> },
   { href: '/coach/announcements', label: 'Announcements', icon: <Megaphone size={18}/> },
-  { href: '/coach/finance', label: 'Finance', icon: <PiggyBank size={18}/> },
-  { href: '/coach/payments', label: 'Payments', icon: <Wallet size={18}/> },
-  { href: '/coach/income', label: 'Income & Donations', icon: <HeartHandshake size={18}/> },
-  { href: '/coach/expenses', label: 'Expenses', icon: <Receipt size={18}/> },
-  { href: '/coach/inventory', label: 'Inventory', icon: <Package size={18}/> },
+  { href: '/coach/finance', label: 'Finance', icon: <PiggyBank size={18}/>, area: 'finance' },
+  { href: '/coach/payments', label: 'Payments', icon: <Wallet size={18}/>, area: 'finance' },
+  { href: '/coach/income', label: 'Income & Donations', icon: <HeartHandshake size={18}/>, area: 'finance' },
+  { href: '/coach/expenses', label: 'Expenses', icon: <Receipt size={18}/>, area: 'finance' },
+  { href: '/coach/inventory', label: 'Inventory', icon: <Package size={18}/>, area: 'inventory' },
   { href: '/scan', label: 'QR Scanner', icon: <QrCode size={18}/> },
-  { href: '/coach/settings', label: 'Club Settings', icon: <Settings size={18}/> },
+  { href: '/coach/settings', label: 'Club Settings', icon: <Settings size={18}/>, area: 'settings' },
   { href: '/coach/profile', label: 'Profile', icon: <UserCircle size={18}/> },
 ]
 
-const adminOnlyNav = [
-  { href: '/coach/staff', label: 'Staff & Parents', icon: <ShieldCheck size={18}/> },
+const adminOnlyNav: { href: string; label: string; icon: JSX.Element; area?: PermissionArea }[] = [
+  { href: '/coach/staff', label: 'Staff & Parents', icon: <ShieldCheck size={18}/>, area: 'staff' },
 ]
 
-const parentNav = [
+const parentNav: { href: string; label: string; icon: JSX.Element; area?: PermissionArea }[] = [
   { href: '/parent', label: 'Home', icon: <Home size={18}/> },
   { href: '/parent/card', label: 'Player Card', icon: <CreditCard size={18}/> },
   { href: '/parent/schedule', label: 'Schedule', icon: <CalendarDays size={18}/> },
@@ -42,7 +43,7 @@ const parentNav = [
   { href: '/parent/leaderboard', label: 'Leaderboard', icon: <Trophy size={18}/> },
 ]
 
-const playerNav = [
+const playerNav: { href: string; label: string; icon: JSX.Element; area?: PermissionArea }[] = [
   { href: '/player', label: 'Home', icon: <Home size={18}/> },
   { href: '/player/card', label: 'My Card', icon: <CreditCard size={18}/> },
   { href: '/player/schedule', label: 'Schedule', icon: <CalendarDays size={18}/> },
@@ -50,12 +51,14 @@ const playerNav = [
   { href: '/player/leaderboard', label: 'Leaderboard', icon: <Trophy size={18}/> },
 ]
 
-export default function Sidebar({ role, userName }: { role: string; userName: string }) {
+export default function Sidebar({ role, userName, permissions }: { role: string; userName: string; permissions?: string[] | null }) {
   const pathname = usePathname()
   const supabase = createClient()
-  const nav = role === 'coach' || role === 'admin'
+  const profile = { role, permissions }
+  const nav = (role === 'coach' || role === 'admin'
     ? [...coachNav, ...(role === 'admin' ? adminOnlyNav : [])]
     : role === 'parent' ? parentNav : playerNav
+  ).filter(item => !item.area || role !== 'admin' || hasPermission(profile, item.area))
   const [clubInfo, setClubInfo] = useState<{ logo_url?: string; name?: string }>({})
 
   useEffect(() => {

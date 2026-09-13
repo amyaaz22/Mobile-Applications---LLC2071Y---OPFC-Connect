@@ -8,6 +8,7 @@ import {
   ShieldCheck, Users2, UserMinus, UserPlus,
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
+import { PERMISSION_AREAS, hasPermission } from '@/lib/permissions'
 
 function InviteModal({ role, onClose, onSent }: { role: 'coach' | 'parent'; onClose: () => void; onSent: () => void }) {
   const [form, setForm] = useState({ email: '', full_name: '' })
@@ -63,6 +64,8 @@ export default function StaffPage() {
 
   const [checked, setChecked] = useState(false)
   const [isAdmin, setIsAdmin] = useState(false)
+  const [viewerId, setViewerId] = useState('')
+  const [viewerIsFullAdmin, setViewerIsFullAdmin] = useState(false)
   const [tab, setTab] = useState<'coaches' | 'parents'>('coaches')
   const [loading, setLoading] = useState(true)
 
@@ -81,8 +84,10 @@ export default function StaffPage() {
     async function check() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.replace('/login'); return }
-      const { data } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-      if (data?.role !== 'admin') { router.replace('/unauthorized'); return }
+      const { data } = await supabase.from('profiles').select('role, permissions').eq('id', user.id).single()
+      if (!hasPermission(data, 'staff')) { router.replace('/unauthorized'); return }
+      setViewerId(user.id)
+      setViewerIsFullAdmin(data?.role === 'admin' && !(data?.permissions?.length))
       setIsAdmin(true)
       setChecked(true)
       loadAll()
@@ -116,10 +121,10 @@ export default function StaffPage() {
     setSearching(false)
   }
 
-  async function promote(id: string) {
-    const { error } = await supabase.from('profiles').update({ role: 'coach' }).eq('id', id)
+  async function promote(id: string, role: 'coach' | 'admin' = 'coach') {
+    const { error } = await supabase.from('profiles').update({ role }).eq('id', id)
     if (error) { toast.error('Failed to promote: ' + error.message); return }
-    toast.success('Promoted to coach')
+    toast.success(role === 'admin' ? 'Promoted to admin' : 'Promoted to coach')
     setPromoteResults(r => r.filter(p => p.id !== id))
     loadAll()
   }
@@ -132,11 +137,27 @@ export default function StaffPage() {
     loadAll()
   }
 
+  async function demoteAdmin(id: string, name: string) {
+    if (!confirm(`Remove admin access for ${name}? They'll become a coach instead.`)) return
+    const { error } = await supabase.from('profiles').update({ role: 'coach', permissions: null }).eq('id', id)
+    if (error) { toast.error('Failed: ' + error.message); return }
+    toast.success('Admin access removed')
+    loadAll()
+  }
+
   async function toggleCategory(profileId: string, current: string[] | null, cat: string) {
     const list = current ?? []
     const next = list.includes(cat) ? list.filter(c => c !== cat) : [...list, cat]
     const { error } = await supabase.from('profiles').update({ assigned_categories: next.length ? next : null }).eq('id', profileId)
     if (error) { toast.error('Failed to update'); return }
+    loadAll()
+  }
+
+  async function togglePermission(profileId: string, current: string[] | null, area: string) {
+    const list = current ?? []
+    const next = list.includes(area) ? list.filter(a => a !== area) : [...list, area]
+    const { error } = await supabase.from('profiles').update({ permissions: next.length ? next : null }).eq('id', profileId)
+    if (error) { toast.error('Failed to update — only an unrestricted admin can change this'); return }
     loadAll()
   }
 
@@ -311,7 +332,12 @@ export default function StaffPage() {
                       <p className="text-white text-sm font-medium">{p.full_name}</p>
                       <p className="text-white/30 text-xs">{p.email} · currently {p.role}</p>
                     </div>
-                    <button onClick={() => promote(p.id)} className="text-teal-400 hover:text-teal-300 text-xs font-semibold">Make Coach</button>
+                    {viewerIsFullAdmin && (
+                      <div className="flex items-center gap-3">
+                        <button onClick={() => promote(p.id, 'coach')} className="text-teal-400 hover:text-teal-300 text-xs font-semibold">Make Coach</button>
+                        <button onClick={() => promote(p.id, 'admin')} className="text-purple-300 hover:text-purple-200 text-xs font-semibold">Make Admin</button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -340,8 +366,16 @@ export default function StaffPage() {
                       <span className={`badge text-xs ${c.role === 'admin' ? 'bg-purple-500/15 text-purple-300 border-purple-500/25' : 'bg-teal-500/15 text-teal-300 border-teal-500/25'}`}>
                         {c.role}
                       </span>
-                      {c.role !== 'admin' && (
+                      {c.role === 'coach' && viewerIsFullAdmin && (
+                        <button onClick={() => promote(c.id, 'admin')} className="text-purple-300/60 hover:text-purple-300 text-xs font-semibold">Make Admin</button>
+                      )}
+                      {c.role !== 'admin' && viewerIsFullAdmin && (
                         <button onClick={() => demote(c.id, c.full_name)} className="text-white/20 hover:text-red-400 transition-colors p-1" title="Remove coach access">
+                          <UserMinus size={15}/>
+                        </button>
+                      )}
+                      {c.role === 'admin' && viewerIsFullAdmin && c.id !== viewerId && (
+                        <button onClick={() => demoteAdmin(c.id, c.full_name)} className="text-white/20 hover:text-red-400 transition-colors p-1" title="Remove admin access">
                           <UserMinus size={15}/>
                         </button>
                       )}
@@ -356,6 +390,27 @@ export default function StaffPage() {
                             className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all
                               ${(c.assigned_categories ?? []).includes(cat) ? 'bg-teal-400/10 border-teal-400/30 text-teal-400' : 'border-white/10 text-white/40 hover:text-white'}`}>
                             {cat}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {c.role === 'admin' && (
+                    <div className="pl-12">
+                      <p className="text-white/25 text-xs mb-1.5">
+                        {(c.permissions?.length ?? 0) === 0
+                          ? 'Unrestricted — full access to everything.'
+                          : 'Restricted to:'}
+                        {!viewerIsFullAdmin && ' Only an unrestricted admin can change this.'}
+                      </p>
+                      <div className="flex gap-1.5 flex-wrap">
+                        {PERMISSION_AREAS.map(({ key, label }) => (
+                          <button key={key} disabled={!viewerIsFullAdmin}
+                            onClick={() => togglePermission(c.id, c.permissions, key)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all disabled:opacity-40 disabled:cursor-not-allowed
+                              ${(c.permissions ?? []).includes(key) ? 'bg-purple-400/10 border-purple-400/30 text-purple-300' : 'border-white/10 text-white/40 hover:text-white'}`}
+                            title={label}>
+                            {label}
                           </button>
                         ))}
                       </div>

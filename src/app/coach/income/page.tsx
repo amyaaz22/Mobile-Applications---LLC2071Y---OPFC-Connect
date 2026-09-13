@@ -5,12 +5,16 @@ import { formatDate } from '@/lib/utils'
 import { toast } from 'react-hot-toast'
 import { Plus, Trash2, Download, Upload, HeartHandshake } from 'lucide-react'
 import * as XLSX from 'xlsx'
+import { useConfigList } from '@/hooks/useConfigList'
+import { usePermissionGuard } from '@/hooks/usePermissionGuard'
 
-const SOURCES = ['Donation', 'Sponsorship', 'Fundraiser', 'Grant', 'Other']
+const FALLBACK_SOURCES = ['Donation', 'Sponsorship', 'Fundraiser', 'Grant', 'Other']
 
 export default function IncomePage() {
   const supabase = createClient()
   const fileRef = useRef<HTMLInputElement>(null)
+  const permitted = usePermissionGuard('finance')
+  const SOURCES = useConfigList('income_sources', FALLBACK_SOURCES)
   const [income, setIncome] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showForm, setShowForm] = useState(false)
@@ -100,6 +104,12 @@ export default function IncomePage() {
   const thisMonth = new Date().toISOString().slice(0, 7)
   const totalThisMonth = income.filter(e => e.date?.startsWith(thisMonth)).reduce((s, e) => s + e.amount, 0)
   const totalAllTime = income.reduce((s, e) => s + e.amount, 0)
+
+  if (!permitted) return (
+    <div className="flex items-center justify-center min-h-screen text-white/30">
+      <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>
+    </div>
+  )
 
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto">

@@ -4,10 +4,12 @@ import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { Player } from '@/types/database'
 import { categoryColor, getAge, formatDate } from '@/lib/utils'
-import { Plus, Search, Filter, Users, Download } from 'lucide-react'
+import { Plus, Search, Filter, Users, Download, FileStack } from 'lucide-react'
 import PlayerCard from '@/components/cards/PlayerCard'
+import { PassCardFront, PassCardBack } from '@/components/cards/PassCard'
 import { toast } from 'react-hot-toast'
 import * as XLSX from 'xlsx'
+import QRCode from 'qrcode'
 
 const FALLBACK_CATEGORIES = ['U9', 'U13', 'First Team']
 
@@ -21,10 +23,16 @@ export default function PlayersPage() {
   const [categories, setCategories] = useState<string[]>(FALLBACK_CATEGORIES)
   const [scopedCategories, setScopedCategories] = useState<string[]>([])
   const [exporting, setExporting] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null)
+  const [renderPlayer, setRenderPlayer] = useState<any>(null)
+  const [renderQrUrl, setRenderQrUrl] = useState('')
+  const [clubInfo, setClubInfo] = useState<{ logo_url?: string; name?: string }>({})
 
   useEffect(() => {
     supabase.from('club_settings').select('value').eq('key', 'categories').single()
       .then(({ data }) => { if (data?.value) setCategories(data.value as string[]) })
+    supabase.from('club_settings').select('value').eq('key', 'club_info').single()
+      .then(({ data }) => { if (data?.value) setClubInfo(data.value as any) })
     // Soft UI scoping: if this coach is limited to specific categories, only
     // offer those here. Not an RLS boundary — see CLAUDE.md.
     supabase.auth.getUser().then(({ data: { user } }) => {
@@ -80,6 +88,56 @@ export default function PlayersPage() {
     }
   }
 
+  async function downloadAllCards() {
+    const { data, error } = await supabase
+      .from('players')
+      .select('*, guardian:guardians(*)')
+      .eq('is_active', true)
+      .order('full_name')
+    if (error || !data?.length) { toast.error('No players to export'); return }
+
+    const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+      import('html2canvas'), import('jspdf'),
+    ])
+    const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [85.6, 54] })
+
+    setBulkProgress({ done: 0, total: data.length })
+    let first = true
+
+    for (const p of data as any[]) {
+      const guardian = Array.isArray(p.guardian) ? p.guardian[0] : p.guardian
+      const qrUrl = await QRCode.toDataURL(`opfc://player/${p.id}`, {
+        color: { dark: '#4EC6C6', light: '#0D1B2A' }, width: 200, margin: 2,
+      })
+      setRenderPlayer(p)
+      setRenderQrUrl(qrUrl)
+      // Wait two frames so React has committed and the browser has painted
+      // the off-screen card before html2canvas captures it.
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+
+      const frontEl = document.getElementById('bulk-card-front')
+      const backEl = document.getElementById('bulk-card-back')
+      if (frontEl) {
+        const c = await html2canvas(frontEl, { scale: 2, backgroundColor: '#0D1B2A', useCORS: true })
+        if (!first) pdf.addPage()
+        pdf.addImage(c.toDataURL('image/png'), 'PNG', 0, 0, 85.6, 54)
+        first = false
+      }
+      if (backEl) {
+        const c = await html2canvas(backEl, { scale: 2, backgroundColor: '#091520', useCORS: true })
+        pdf.addPage()
+        pdf.addImage(c.toDataURL('image/png'), 'PNG', 0, 0, 85.6, 54)
+      }
+
+      setBulkProgress(prog => prog ? { done: prog.done + 1, total: prog.total } : prog)
+    }
+
+    setRenderPlayer(null)
+    pdf.save(`OPFC_All_Player_Cards_${new Date().toISOString().split('T')[0]}.pdf`)
+    toast.success(`${data.length} player cards downloaded`)
+    setBulkProgress(null)
+  }
+
   useEffect(() => {
     async function fetchPlayers() {
       setLoading(true)
@@ -115,6 +173,10 @@ export default function PlayersPage() {
           <button onClick={exportToExcel} disabled={exporting}
             className="btn-secondary flex items-center gap-2 self-start text-sm">
             <Download size={14}/> {exporting ? 'Exporting…' : 'Export'}
+          </button>
+          <button onClick={downloadAllCards} disabled={!!bulkProgress}
+            className="btn-secondary flex items-center gap-2 self-start text-sm">
+            <FileStack size={14}/> {bulkProgress ? `${bulkProgress.done}/${bulkProgress.total}…` : 'Download All Cards'}
           </button>
           <Link href="/coach/players/import" className="btn-secondary flex items-center gap-2 self-start text-sm">
             <span>↑</span> Import
@@ -231,6 +293,33 @@ export default function PlayersPage() {
               </table>
             </div>
           )}
+        </div>
+      )}
+
+      {/* Off-screen render target for bulk card generation — in the DOM
+          (not display:none) so html2canvas can actually capture it. */}
+      <div style={{ position: 'fixed', top: 0, left: -9999, pointerEvents: 'none' }}>
+        {renderPlayer && (
+          <>
+            <div id="bulk-card-front"><PassCardFront player={renderPlayer} logoUrl={clubInfo.logo_url} clubName={clubInfo.name}
+              guardianPhone={(Array.isArray(renderPlayer.guardian) ? renderPlayer.guardian[0] : renderPlayer.guardian)?.phone_primary}/></div>
+            <div id="bulk-card-back"><PassCardBack player={renderPlayer} qrUrl={renderQrUrl}
+              guardianPhone={(Array.isArray(renderPlayer.guardian) ? renderPlayer.guardian[0] : renderPlayer.guardian)?.phone_primary}/></div>
+          </>
+        )}
+      </div>
+
+      {/* Bulk download progress */}
+      {bulkProgress && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="card p-6 w-full max-w-sm text-center">
+            <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full mx-auto mb-4"/>
+            <p className="text-white font-semibold text-sm">Generating player cards…</p>
+            <p className="text-white/40 text-xs mt-1">{bulkProgress.done} of {bulkProgress.total} — please keep this tab open</p>
+            <div className="h-1.5 bg-white/10 rounded-full overflow-hidden mt-4">
+              <div className="h-full bg-teal-400 rounded-full transition-all" style={{ width: `${(bulkProgress.done / bulkProgress.total) * 100}%` }}/>
+            </div>
+          </div>
         </div>
       )}
     </div>

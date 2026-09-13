@@ -5,14 +5,14 @@ import Sidebar from './Sidebar'
 import MobileNav from './MobileNav'
 
 export default function CoachGuard({ children }: { children: React.ReactNode }) {
-  const [profile, setProfile] = useState<{ role: string; full_name: string } | null>(null)
+  const [profile, setProfile] = useState<{ role: string; full_name: string; permissions?: string[] | null } | null>(null)
   const [checked, setChecked] = useState(false)
 
   useEffect(() => {
     const supabase = createClient()
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) { window.location.replace('/login'); return }
-      supabase.from('profiles').select('role, full_name').eq('id', session.user.id).single()
+      supabase.from('profiles').select('role, full_name, permissions').eq('id', session.user.id).single()
         .then(({ data }) => {
           if (!data || !['admin', 'coach'].includes(data.role)) {
             window.location.replace('/login')
@@ -36,7 +36,7 @@ export default function CoachGuard({ children }: { children: React.ReactNode }) 
 
   return (
     <div className="min-h-screen">
-      <Sidebar role={profile!.role} userName={profile!.full_name}/>
+      <Sidebar role={profile!.role} userName={profile!.full_name} permissions={profile!.permissions}/>
       <MobileNav role={profile!.role}/>
       <main className="md:ml-64 pb-20 md:pb-0 min-h-screen">{children}</main>
     </div>
