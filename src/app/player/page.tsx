@@ -26,7 +26,7 @@ export default function PlayerDashboard() {
         supabase.from('attendance').select('*').eq('player_id', (player as any)?.id ?? ''),
         supabase.from('payments').select('*').eq('player_id', (player as any)?.id ?? '').eq('month', getCurrentMonth()).single(),
         supabase.from('player_points').select('points').eq('player_id', (player as any)?.id ?? ''),
-        supabase.from('global_awards').select('points').or(`target_category.eq.All,target_category.eq.${(player as any)?.category ?? 'First Team'}`),
+        supabase.from('global_awards').select('points').overlaps('target_category', ['All', (player as any)?.category ?? 'All']),
       ])
 
       const presentCount = attendance?.filter((a: any) => a.status === 'present').length ?? 0

@@ -261,8 +261,11 @@ export default function AnalyticsDashboard() {
     recentActivity, sessionTypeData,
   } = data
 
-  const CATEGORY_COLORS: Record<string, string> = {
-    'U9': '#f97316', 'U13': '#a855f7', 'First Team': '#4EC6C6'
+  const CATEGORY_PALETTE = ['#f97316', '#a855f7', '#4EC6C6', '#f5a623', '#38bdf8', '#f472b6']
+  const categoryOrder: string[] = (categoryData ?? []).map((c: any) => c.name ?? c.category)
+  function categoryColorFor(name: string) {
+    const i = categoryOrder.indexOf(name)
+    return CATEGORY_PALETTE[i >= 0 ? i % CATEGORY_PALETTE.length : 0]
   }
 
   return (
@@ -304,7 +307,7 @@ export default function AnalyticsDashboard() {
               <Tooltip content={<ChartTooltip/>}/>
               <Bar dataKey="count" radius={[0, 6, 6, 0]} name="Players">
                 {categoryData.map((entry: any) => (
-                  <Cell key={entry.name} fill={CATEGORY_COLORS[entry.name] ?? '#4EC6C6'}/>
+                  <Cell key={entry.name} fill={categoryColorFor(entry.name)}/>
                 ))}
               </Bar>
             </BarChart>
@@ -390,7 +393,7 @@ export default function AnalyticsDashboard() {
                       className="h-full rounded-full transition-all"
                       style={{
                         width: `${cat.rate}%`,
-                        background: CATEGORY_COLORS[cat.category] ?? '#4EC6C6'
+                        background: categoryColorFor(cat.category)
                       }}
                     />
                   </div>

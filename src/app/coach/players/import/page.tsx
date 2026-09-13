@@ -181,10 +181,13 @@ export default function ImportPlayersPage() {
   const [done, setDone] = useState(false)
   const [results, setResults] = useState<{ success: number; failed: number }>({ success: 0, failed: 0 })
   const [categories, setCategories] = useState<string[]>(FALLBACK_CATEGORIES)
+  const [entryFee, setEntryFee] = useState<number | null>(null)
 
   useEffect(() => {
     supabase.from('club_settings').select('value').eq('key', 'categories').single()
       .then(({ data }) => { if (data?.value) setCategories(data.value as string[]) })
+    supabase.from('club_settings').select('value').eq('key', 'fees').single()
+      .then(({ data }) => { const entry = (data?.value as any)?.entry; if (entry) setEntryFee(entry) })
   }, [])
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
@@ -253,6 +256,10 @@ export default function ImportPlayersPage() {
           updated[i] = { ...r, status: 'error', error: 'Guardian insert failed: ' + ge.message }
           failed++
           continue
+        }
+
+        if (entryFee) {
+          await supabase.from('payments').insert({ player_id: player.id, type: 'entry', amount: entryFee, status: 'pending' })
         }
 
         updated[i] = { ...r, status: 'success' }

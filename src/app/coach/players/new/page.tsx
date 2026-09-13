@@ -44,6 +44,13 @@ export default function NewPlayerPage() {
     if (pe || !newPlayer) { toast.error('Failed to create player'); setSaving(false); return }
     const { error: ge } = await supabase.from('guardians').insert({ ...guardian, player_id: newPlayer.id })
     if (ge) { toast.error('Player created but guardian failed'); setSaving(false); return }
+
+    const { data: fees } = await supabase.from('club_settings').select('value').eq('key', 'fees').single()
+    const entryFee = (fees?.value as any)?.entry
+    if (entryFee) {
+      await supabase.from('payments').insert({ player_id: newPlayer.id, type: 'entry', amount: entryFee, status: 'pending' })
+    }
+
     toast.success(`${player.full_name} registered!`)
     router.push(`/coach/players/${newPlayer.id}`)
   }

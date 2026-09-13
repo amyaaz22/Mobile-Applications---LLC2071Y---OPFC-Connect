@@ -13,8 +13,13 @@ export default function AnnouncementsPage() {
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ title: '', body: '', tag: 'General', target_category: 'All', is_urgent: false })
   const [saving, setSaving] = useState(false)
+  const [categories, setCategories] = useState<string[]>(['U9', 'U13', 'First Team'])
 
-  useEffect(() => { fetchAnnouncements() }, [])
+  useEffect(() => {
+    fetchAnnouncements()
+    supabase.from('club_settings').select('value').eq('key', 'categories').single()
+      .then(({ data }) => { if (data?.value) setCategories(data.value as string[]) })
+  }, [])
 
   async function fetchAnnouncements() {
     const { data } = await supabase.from('announcements').select('*').order('created_at', { ascending: false })
@@ -76,9 +81,7 @@ export default function AnnouncementsPage() {
               <label className="label mb-1.5 block">Target</label>
               <select className="input" value={form.target_category} onChange={e => setForm(f => ({ ...f, target_category: e.target.value }))}>
                 <option value="All">All</option>
-                <option value="U9">U9</option>
-                <option value="U13">U13</option>
-                <option value="First Team">First Team</option>
+                {categories.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
           </div>

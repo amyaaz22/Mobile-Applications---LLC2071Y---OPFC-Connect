@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter } from 'next/navigation'
 import { toast } from 'react-hot-toast'
@@ -10,6 +10,13 @@ export default function NewSessionPage() {
   const supabase = createClient()
   const router = useRouter()
   const [saving, setSaving] = useState(false)
+  const [categories, setCategories] = useState<string[]>(['U9', 'U13', 'First Team'])
+
+  useEffect(() => {
+    supabase.from('club_settings').select('value').eq('key', 'categories').single()
+      .then(({ data }) => { if (data?.value) setCategories(data.value as string[]) })
+  }, [])
+
   const [form, setForm] = useState({
     title: '',
     session_type: 'training',
@@ -60,9 +67,7 @@ export default function NewSessionPage() {
             <label className="label mb-1.5 block">Category</label>
             <select className="input" value={form.category} onChange={e => set('category', e.target.value)}>
               <option value="All">All</option>
-              <option value="U9">U9</option>
-              <option value="U13">U13</option>
-              <option value="First Team">First Team</option>
+              {categories.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
         </div>

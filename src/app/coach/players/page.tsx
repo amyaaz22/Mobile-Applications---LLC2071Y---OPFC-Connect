@@ -19,12 +19,22 @@ export default function PlayersPage() {
   const [category, setCategory] = useState('All')
   const [viewMode, setViewMode] = useState<'list' | 'cards'>('list')
   const [categories, setCategories] = useState<string[]>(FALLBACK_CATEGORIES)
+  const [scopedCategories, setScopedCategories] = useState<string[]>([])
   const [exporting, setExporting] = useState(false)
 
   useEffect(() => {
     supabase.from('club_settings').select('value').eq('key', 'categories').single()
       .then(({ data }) => { if (data?.value) setCategories(data.value as string[]) })
+    // Soft UI scoping: if this coach is limited to specific categories, only
+    // offer those here. Not an RLS boundary — see CLAUDE.md.
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      supabase.from('profiles').select('assigned_categories').eq('id', user.id).single()
+        .then(({ data }) => { if (data?.assigned_categories?.length) setScopedCategories(data.assigned_categories) })
+    })
   }, [])
+
+  const visibleCategories = scopedCategories.length ? scopedCategories : categories
 
   async function exportToExcel() {
     setExporting(true)
@@ -80,6 +90,7 @@ export default function PlayersPage() {
         .order('full_name')
 
       if (category !== 'All') query = query.eq('category', category)
+      else if (scopedCategories.length) query = query.in('category', scopedCategories)
       if (search) query = query.ilike('full_name', `%${search}%`)
 
       const { data } = await query
@@ -90,7 +101,7 @@ export default function PlayersPage() {
       setLoading(false)
     }
     fetchPlayers()
-  }, [search, category])
+  }, [search, category, scopedCategories])
 
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto">
@@ -127,7 +138,7 @@ export default function PlayersPage() {
           />
         </div>
         <div className="flex gap-2">
-          {['All', ...categories].map(cat => (
+          {['All', ...visibleCategories].map(cat => (
             <button key={cat} onClick={() => setCategory(cat)}
               className={`px-4 py-2.5 rounded-xl text-sm font-semibold transition-all border
                 ${category === cat

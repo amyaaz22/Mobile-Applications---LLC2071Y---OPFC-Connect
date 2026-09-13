@@ -27,7 +27,7 @@ export default function ParentDashboard() {
         supabase.from('attendance').select('*').eq('player_id', player?.id ?? ''),
         supabase.from('payments').select('*').eq('player_id', player?.id ?? '').eq('month', getCurrentMonth()).single(),
         supabase.from('player_points').select('points').eq('player_id', player?.id ?? ''),
-        supabase.from('global_awards').select('points').or(`target_category.eq.All,target_category.eq.${player?.category ?? 'All'}`),
+        supabase.from('global_awards').select('points').overlaps('target_category', ['All', player?.category ?? 'All']),
       ])
 
       const presentCount = attendance?.filter((a: any) => a.status === 'present').length ?? 0

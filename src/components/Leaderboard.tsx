@@ -47,7 +47,7 @@ export default function Leaderboard({ highlightPlayerId }: { highlightPlayerId?:
     const { data: globals } = await supabase
       .from('global_awards')
       .select('*')
-      .or(`target_category.eq.All,target_category.eq.${selectedCat}`)
+      .overlaps('target_category', selectedCat === 'All' ? ['All'] : ['All', selectedCat])
 
     setGlobalAwards(globals ?? [])
 

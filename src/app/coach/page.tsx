@@ -2,8 +2,8 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
-import { Users, CalendarDays, Wallet, QrCode, ChevronRight } from 'lucide-react'
-import { formatDate, categoryColor } from '@/lib/utils'
+import { Users, CalendarDays, Wallet, QrCode, ChevronRight, PiggyBank, Package, ShieldCheck, AlertTriangle } from 'lucide-react'
+import { formatDate, categoryColor, getCurrentMonth } from '@/lib/utils'
 
 export default function CoachDashboard() {
   const [data, setData] = useState<any>(null)
@@ -19,19 +19,48 @@ export default function CoachDashboard() {
         { data: profile },
         { count: playerCount },
         { data: sessions },
-        { count: pendingPayments },
+        { data: monthPayments },
         { data: announcements },
         { data: recentAttendance },
       ] = await Promise.all([
         supabase.from('profiles').select('full_name, role').eq('id', user.id).single(),
         supabase.from('players').select('*', { count: 'exact', head: true }).eq('is_active', true),
         supabase.from('training_sessions').select('*').gte('date', new Date().toISOString().split('T')[0]).order('date').limit(3),
-        supabase.from('payments').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
+        supabase.from('payments').select('player_id, status, type').eq('status', 'paid').eq('type', 'monthly').eq('month', getCurrentMonth()),
         supabase.from('announcements').select('*').order('created_at', { ascending: false }).limit(3),
         supabase.from('attendance').select('*, player:players(full_name), session:training_sessions(title, date)').order('scanned_at', { ascending: false }).limit(5),
       ])
 
-      setData({ profile, playerCount, sessions, pendingPayments, announcements, recentAttendance })
+      // A payment row only exists once someone has touched it — so "pending"
+      // is every active player who hasn't been marked paid this month, not
+      // just players with an explicit pending row.
+      const paidThisMonth = new Set((monthPayments ?? []).map(p => p.player_id))
+      const pendingPayments = Math.max((playerCount ?? 0) - paidThisMonth.size, 0)
+
+      let admin: any = null
+      if (profile?.role === 'admin') {
+        const [
+          { data: paidPayments }, { data: incomeRows }, { data: expenseRows },
+          { data: inventoryRows }, { count: staffCount }, { count: entryOutstanding }, { data: players },
+        ] = await Promise.all([
+          supabase.from('payments').select('amount').eq('status', 'paid'),
+          supabase.from('income').select('amount'),
+          supabase.from('expenses').select('amount'),
+          supabase.from('inventory_items').select('quantity, min_stock'),
+          supabase.from('profiles').select('*', { count: 'exact', head: true }).in('role', ['admin', 'coach']),
+          supabase.from('payments').select('*', { count: 'exact', head: true }).eq('type', 'entry').eq('status', 'pending'),
+          supabase.from('players').select('category').eq('is_active', true),
+        ])
+        const balance = (paidPayments ?? []).reduce((s, p) => s + p.amount, 0)
+          + (incomeRows ?? []).reduce((s, i) => s + i.amount, 0)
+          - (expenseRows ?? []).reduce((s, e) => s + e.amount, 0)
+        const lowStockCount = (inventoryRows ?? []).filter((i: any) => i.quantity <= (i.min_stock ?? 0)).length
+        const byCategory: Record<string, number> = {}
+        ;(players ?? []).forEach((p: any) => { byCategory[p.category] = (byCategory[p.category] ?? 0) + 1 })
+        admin = { balance, staffCount: staffCount ?? 0, entryOutstanding: entryOutstanding ?? 0, lowStockCount, byCategory }
+      }
+
+      setData({ profile, playerCount, sessions, pendingPayments, announcements, recentAttendance, admin })
       setLoading(false)
     }
     load()
@@ -47,7 +76,7 @@ export default function CoachDashboard() {
     </div>
   )
 
-  const { profile, playerCount, sessions, pendingPayments, announcements, recentAttendance } = data
+  const { profile, playerCount, sessions, pendingPayments, announcements, recentAttendance, admin } = data
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening'
   const firstName = profile?.full_name?.split(' ')[0] ?? 'Coach'
@@ -67,6 +96,43 @@ export default function CoachDashboard() {
         </h1>
         <p className="text-white/30 text-sm mt-1">{formatDate(new Date().toISOString())}</p>
       </div>
+
+      {/* Admin bird's-eye overview */}
+      {admin && (
+        <div className="card p-5 mb-8 border-teal-400/15 bg-teal-400/3">
+          <div className="flex items-center gap-2 mb-4">
+            <ShieldCheck size={16} className="text-teal-400"/>
+            <h2 className="section-title mb-0">Club Overview</h2>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-4">
+            <Link href="/coach/finance" className="p-3 rounded-xl hover:bg-white/5 transition-colors">
+              <div className={`text-2xl font-black font-condensed ${admin.balance >= 0 ? 'text-teal-400' : 'text-red-400'}`}>Rs {admin.balance.toLocaleString()}</div>
+              <div className="text-white/40 text-xs mt-1 flex items-center gap-1"><PiggyBank size={12}/> Club balance</div>
+            </Link>
+            <Link href="/coach/payments" className="p-3 rounded-xl hover:bg-white/5 transition-colors">
+              <div className="text-2xl font-black font-condensed text-amber-400">{admin.entryOutstanding}</div>
+              <div className="text-white/40 text-xs mt-1 flex items-center gap-1"><Wallet size={12}/> Entry fees outstanding</div>
+            </Link>
+            <Link href="/coach/inventory" className="p-3 rounded-xl hover:bg-white/5 transition-colors">
+              <div className={`text-2xl font-black font-condensed flex items-center gap-1.5 ${admin.lowStockCount > 0 ? 'text-red-400' : 'text-white'}`}>
+                {admin.lowStockCount > 0 && <AlertTriangle size={18}/>}{admin.lowStockCount}
+              </div>
+              <div className="text-white/40 text-xs mt-1 flex items-center gap-1"><Package size={12}/> Low-stock items</div>
+            </Link>
+            <Link href="/coach/staff" className="p-3 rounded-xl hover:bg-white/5 transition-colors">
+              <div className="text-2xl font-black font-condensed text-white">{admin.staffCount}</div>
+              <div className="text-white/40 text-xs mt-1 flex items-center gap-1"><ShieldCheck size={12}/> Coaches &amp; admins</div>
+            </Link>
+          </div>
+          {Object.keys(admin.byCategory).length > 0 && (
+            <div className="flex gap-2 flex-wrap pt-3 border-t border-white/5">
+              {Object.entries(admin.byCategory).map(([cat, count]) => (
+                <span key={cat} className="badge bg-white/5 text-white/50 border-white/10 text-xs">{cat}: {count as number}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
         {stats.map(({ label, value, icon, href, color }) => (
