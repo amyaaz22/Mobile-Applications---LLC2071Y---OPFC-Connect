@@ -84,7 +84,7 @@ export default function StaffPage() {
     async function check() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.replace('/login'); return }
-      const { data } = await supabase.from('profiles').select('role, permissions').eq('id', user.id).single()
+      const { data } = await supabase.from('profiles').select('*').eq('id', user.id).single()
       if (!hasPermission(data, 'staff')) { router.replace('/unauthorized'); return }
       setViewerId(user.id)
       setViewerIsFullAdmin(data?.role === 'admin' && !(data?.permissions?.length))
