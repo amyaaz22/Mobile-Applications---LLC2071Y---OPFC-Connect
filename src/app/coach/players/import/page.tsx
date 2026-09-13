@@ -1,10 +1,19 @@
 'use client'
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'react-hot-toast'
 import { Download, Upload, CheckCircle, XCircle, ArrowLeft, FileSpreadsheet } from 'lucide-react'
 import Link from 'next/link'
 import * as XLSX from 'xlsx'
+
+const FALLBACK_CATEGORIES = ['U9', 'U13', 'First Team']
+const CATEGORY_COLORS = [
+  'bg-orange-500/20 text-orange-300 border-orange-500/30',
+  'bg-purple-500/20 text-purple-300 border-purple-500/30',
+  'bg-teal-500/20 text-teal-300 border-teal-500/30',
+  'bg-amber-500/20 text-amber-300 border-amber-500/30',
+  'bg-sky-500/20 text-sky-300 border-sky-500/30',
+]
 
 interface ImportRow {
   row: number
@@ -24,58 +33,63 @@ interface ImportRow {
   error?: string
 }
 
-const SAMPLE_DATA = [
-  {
-    'Full Name': 'Yannick Ferreira',
-    'Date of Birth (DD/MM/YYYY)': '14/03/2006',
-    'Category (U9 / U13 / First Team)': 'First Team',
-    'Position (GK / DEF / MID / FWD)': 'FWD',
-    'Nationality': 'Mauritian',
-    'School / Grade': 'Grade 11 — Royal College Port Louis',
-    'Address': 'Avenue des Cocotiers, Pailles',
-    'Medical Notes': '',
-    'Guardian Full Name': 'Marc Ferreira',
-    'Guardian Relationship': 'Father',
-    'Guardian Phone (WhatsApp)': '57123456',
-    'Guardian Email': 'marc@email.mu',
-  },
-  {
-    'Full Name': 'Rayan Boodhoo',
-    'Date of Birth (DD/MM/YYYY)': '22/07/2011',
-    'Category (U9 / U13 / First Team)': 'U13',
-    'Position (GK / DEF / MID / FWD)': 'MID',
-    'Nationality': 'Mauritian',
-    'School / Grade': 'Grade 6 — Raffray Government School',
-    'Address': 'Rue de la Paix, Pailles',
-    'Medical Notes': 'Mild asthma — has inhaler',
-    'Guardian Full Name': 'Sarah Boodhoo',
-    'Guardian Relationship': 'Mother',
-    'Guardian Phone (WhatsApp)': '58234567',
-    'Guardian Email': 'sarah@email.mu',
-  },
-  {
-    'Full Name': 'Kian Bhookhun',
-    'Date of Birth (DD/MM/YYYY)': '11/09/2016',
-    'Category (U9 / U13 / First Team)': 'U9',
-    'Position (GK / DEF / MID / FWD)': 'GK',
-    'Nationality': 'Mauritian',
-    'School / Grade': 'Grade 1 — Pailles Primary',
-    'Address': 'Résidence Raffray, Pailles',
-    'Medical Notes': '',
-    'Guardian Full Name': 'Priya Bhookhun',
-    'Guardian Relationship': 'Mother',
-    'Guardian Phone (WhatsApp)': '56456789',
-    'Guardian Email': '',
-  },
-]
+function buildSampleData(categories: string[]) {
+  const cats = categories.length ? categories : FALLBACK_CATEGORIES
+  const pick = (i: number) => cats[i % cats.length]
+  return [
+    {
+      'Full Name': 'Yannick Ferreira',
+      'Date of Birth (DD/MM/YYYY)': '14/03/2006',
+      'Category': pick(2),
+      'Position (GK / DEF / MID / FWD)': 'FWD',
+      'Nationality': 'Mauritian',
+      'School / Grade': 'Grade 11 — Royal College Port Louis',
+      'Address': 'Avenue des Cocotiers, Pailles',
+      'Medical Notes': '',
+      'Guardian Full Name': 'Marc Ferreira',
+      'Guardian Relationship': 'Father',
+      'Guardian Phone (WhatsApp)': '57123456',
+      'Guardian Email': 'marc@email.mu',
+    },
+    {
+      'Full Name': 'Rayan Boodhoo',
+      'Date of Birth (DD/MM/YYYY)': '22/07/2011',
+      'Category': pick(1),
+      'Position (GK / DEF / MID / FWD)': 'MID',
+      'Nationality': 'Mauritian',
+      'School / Grade': 'Grade 6 — Raffray Government School',
+      'Address': 'Rue de la Paix, Pailles',
+      'Medical Notes': 'Mild asthma — has inhaler',
+      'Guardian Full Name': 'Sarah Boodhoo',
+      'Guardian Relationship': 'Mother',
+      'Guardian Phone (WhatsApp)': '58234567',
+      'Guardian Email': 'sarah@email.mu',
+    },
+    {
+      'Full Name': 'Kian Bhookhun',
+      'Date of Birth (DD/MM/YYYY)': '11/09/2016',
+      'Category': pick(0),
+      'Position (GK / DEF / MID / FWD)': 'GK',
+      'Nationality': 'Mauritian',
+      'School / Grade': 'Grade 1 — Pailles Primary',
+      'Address': 'Résidence Raffray, Pailles',
+      'Medical Notes': '',
+      'Guardian Full Name': 'Priya Bhookhun',
+      'Guardian Relationship': 'Mother',
+      'Guardian Phone (WhatsApp)': '56456789',
+      'Guardian Email': '',
+    },
+  ]
+}
 
-function downloadSample() {
+function downloadSample(categories: string[]) {
+  const cats = categories.length ? categories : FALLBACK_CATEGORIES
   const wb = XLSX.utils.book_new()
-  const ws = XLSX.utils.json_to_sheet(SAMPLE_DATA)
+  const ws = XLSX.utils.json_to_sheet(buildSampleData(cats))
 
   // Column widths
   ws['!cols'] = [
-    { wch: 24 }, { wch: 22 }, { wch: 28 }, { wch: 28 },
+    { wch: 24 }, { wch: 22 }, { wch: 16 }, { wch: 28 },
     { wch: 14 }, { wch: 30 }, { wch: 28 }, { wch: 22 },
     { wch: 22 }, { wch: 22 }, { wch: 22 }, { wch: 24 },
   ]
@@ -90,7 +104,7 @@ function downloadSample() {
     ['1. Fill in the Players sheet with your player data'],
     ['2. Do NOT change column headers'],
     ['3. Date of Birth must be in DD/MM/YYYY format (e.g. 14/03/2006)'],
-    ['4. Category must be exactly: U9, U13, or First Team'],
+    [`4. Category must be exactly one of: ${cats.join(', ')} (set in Club Settings)`],
     ['5. Position must be exactly: GK, DEF, MID, or FWD'],
     ['6. Guardian Phone should be the WhatsApp number'],
     ['7. Guardian Email is optional but recommended for player card delivery'],
@@ -124,17 +138,18 @@ function parseDate(raw: string): string | null {
   return null
 }
 
-function validateRow(row: any, i: number): ImportRow | null {
+function validateRow(row: any, i: number, categories: string[]): ImportRow | null {
   const name = String(row['Full Name'] ?? '').trim()
   if (!name) return null // skip empty rows
 
   const dob = parseDate(row['Date of Birth (DD/MM/YYYY)'])
-  const category = String(row['Category (U9 / U13 / First Team)'] ?? '').trim()
+  // 'Category' is the current header; older templates used the parenthetical form
+  const category = String(row['Category'] ?? row['Category (U9 / U13 / First Team)'] ?? '').trim()
   const position = String(row['Position (GK / DEF / MID / FWD)'] ?? '').trim()
 
   const errors: string[] = []
   if (!dob) errors.push('Invalid date of birth')
-  if (!['U9','U13','First Team'].includes(category)) errors.push('Invalid category')
+  if (!categories.includes(category)) errors.push(`Invalid category (must be one of: ${categories.join(', ')})`)
   if (!['GK','DEF','MID','FWD'].includes(position)) errors.push('Invalid position')
   if (!String(row['Guardian Full Name'] ?? '').trim()) errors.push('Guardian name required')
   if (!String(row['Guardian Phone (WhatsApp)'] ?? '').trim()) errors.push('Guardian phone required')
@@ -165,6 +180,15 @@ export default function ImportPlayersPage() {
   const [importing, setImporting] = useState(false)
   const [done, setDone] = useState(false)
   const [results, setResults] = useState<{ success: number; failed: number }>({ success: 0, failed: 0 })
+  const [categories, setCategories] = useState<string[]>(FALLBACK_CATEGORIES)
+  const [entryFee, setEntryFee] = useState<number | null>(null)
+
+  useEffect(() => {
+    supabase.from('club_settings').select('value').eq('key', 'categories').single()
+      .then(({ data }) => { if (data?.value) setCategories(data.value as string[]) })
+    supabase.from('club_settings').select('value').eq('key', 'fees').single()
+      .then(({ data }) => { const entry = (data?.value as any)?.entry; if (entry) setEntryFee(entry) })
+  }, [])
 
   function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -176,7 +200,7 @@ export default function ImportPlayersPage() {
       const ws = wb.Sheets['Players'] ?? wb.Sheets[wb.SheetNames[0]]
       const json = XLSX.utils.sheet_to_json(ws)
       const parsed = (json as any[])
-        .map((row: any, i: number) => validateRow(row, i))
+        .map((row: any, i: number) => validateRow(row, i, categories))
         .filter(Boolean) as ImportRow[]
       setRows(parsed)
       setDone(false)
@@ -234,6 +258,10 @@ export default function ImportPlayersPage() {
           continue
         }
 
+        if (entryFee) {
+          await supabase.from('payments').insert({ player_id: player.id, type: 'entry', amount: entryFee, status: 'pending' })
+        }
+
         updated[i] = { ...r, status: 'success' }
         success++
       } catch (err: any) {
@@ -269,7 +297,7 @@ export default function ImportPlayersPage() {
           <h1 className="page-title">Import Players</h1>
           <p className="text-white/30 text-sm mt-1">Upload an Excel file to register multiple players at once</p>
         </div>
-        <button onClick={downloadSample}
+        <button onClick={() => downloadSample(categories)}
           className="btn-secondary flex items-center gap-2">
           <Download size={16}/> Download Template
         </button>
@@ -345,7 +373,7 @@ export default function ImportPlayersPage() {
                       <td className="px-3 py-2.5 text-white font-medium">{r.full_name}</td>
                       <td className="px-3 py-2.5 text-white/60">{r.date_of_birth}</td>
                       <td className="px-3 py-2.5">
-                        <span className={`badge text-xs ${r.category === 'U9' ? 'bg-orange-500/20 text-orange-300 border-orange-500/30' : r.category === 'U13' ? 'bg-purple-500/20 text-purple-300 border-purple-500/30' : 'bg-teal-500/20 text-teal-300 border-teal-500/30'}`}>
+                        <span className={`badge text-xs ${CATEGORY_COLORS[categories.indexOf(r.category) % CATEGORY_COLORS.length] ?? 'bg-white/10 text-white/50 border-white/20'}`}>
                           {r.category}
                         </span>
                       </td>

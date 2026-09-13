@@ -30,7 +30,13 @@ export default function ParentCardPage() {
         .eq('player_id', player.id)
         .single()
 
-      setData({ player, fanCard: fanCard ?? {} })
+      const { data: clubInfo } = await supabase
+        .from('club_settings')
+        .select('value')
+        .eq('key', 'club_info')
+        .single()
+
+      setData({ player, fanCard: fanCard ?? {}, guardianPhone: guardian.phone_primary, clubInfo: (clubInfo?.value as any) ?? {} })
       setLoading(false)
     }
     load()
@@ -46,7 +52,7 @@ export default function ParentCardPage() {
     <div className="p-8 text-center text-white/30">No player linked. Contact your coach.</div>
   )
 
-  const { player, fanCard } = data
+  const { player, fanCard, guardianPhone, clubInfo } = data
 
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto">
@@ -63,11 +69,11 @@ export default function ParentCardPage() {
           <div className="flex flex-col items-center gap-3">
             <div>
               <p className="section-title mb-2 text-center text-xs">FRONT</p>
-              <PassCardFront player={player}/>
+              <PassCardFront player={player} logoUrl={clubInfo?.logo_url} clubName={clubInfo?.name} guardianPhone={guardianPhone}/>
             </div>
             <div>
               <p className="section-title mb-2 text-center text-xs">BACK (QR — coach will share)</p>
-              <PassCardBack player={player}/>
+              <PassCardBack player={player} guardianPhone={guardianPhone}/>
             </div>
             <p className="text-white/20 text-xs text-center">The QR back card is available from your coach after registration confirmation</p>
           </div>

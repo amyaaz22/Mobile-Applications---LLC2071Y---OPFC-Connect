@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import PlayerCard from '@/components/cards/PlayerCard'
 import { formatDate, categoryColor, paymentStatusColor, getCurrentMonth } from '@/lib/utils'
-import { CalendarDays, CreditCard } from 'lucide-react'
+import { CalendarDays, CreditCard, Trophy } from 'lucide-react'
 
 export default function ParentDashboard() {
   const [data, setData] = useState<any>(null)
@@ -21,18 +21,22 @@ export default function ParentDashboard() {
       const player = guardian?.player as any
       const stats = player?.stats?.sort((a: any, b: any) => b.assessed_month.localeCompare(a.assessed_month))[0] ?? null
 
-      const [{ data: sessions }, { data: announcements }, { data: attendance }, { data: payment }] = await Promise.all([
+      const [{ data: sessions }, { data: announcements }, { data: attendance }, { data: payment }, { data: playerPoints }, { data: globalAwards }] = await Promise.all([
         supabase.from('training_sessions').select('*').gte('date', new Date().toISOString().split('T')[0]).or(`category.eq.${player?.category ?? 'All'},category.eq.All`).order('date').limit(3),
         supabase.from('announcements').select('*').or(`target_category.eq.All,target_category.eq.${player?.category ?? 'All'}`).order('created_at', { ascending: false }).limit(3),
         supabase.from('attendance').select('*').eq('player_id', player?.id ?? ''),
         supabase.from('payments').select('*').eq('player_id', player?.id ?? '').eq('month', getCurrentMonth()).single(),
+        supabase.from('player_points').select('points').eq('player_id', player?.id ?? ''),
+        supabase.from('global_awards').select('points').overlaps('target_category', ['All', player?.category ?? 'All']),
       ])
 
       const presentCount = attendance?.filter((a: any) => a.status === 'present').length ?? 0
       const totalCount = attendance?.length ?? 0
       const attendanceRate = totalCount > 0 ? Math.round(100 * presentCount / totalCount) : 0
+      const totalPoints = (playerPoints?.reduce((s: number, p: any) => s + p.points, 0) ?? 0)
+        + (globalAwards?.reduce((s: number, g: any) => s + g.points, 0) ?? 0)
 
-      setData({ profile, player, stats, sessions, announcements, attendanceRate, presentCount, totalCount, payment })
+      setData({ profile, player, stats, sessions, announcements, attendanceRate, presentCount, totalCount, payment, totalPoints })
       setLoading(false)
     }
     load()
@@ -48,7 +52,7 @@ export default function ParentDashboard() {
     </div>
   )
 
-  const { profile, player, stats, sessions, announcements, attendanceRate, presentCount, totalCount, payment } = data
+  const { profile, player, stats, sessions, announcements, attendanceRate, presentCount, totalCount, payment, totalPoints } = data
   const hour = new Date().getHours()
   const greeting = hour < 12 ? 'Good Morning' : hour < 17 ? 'Good Afternoon' : 'Good Evening'
 
@@ -77,12 +81,19 @@ export default function ParentDashboard() {
 
         <div className="lg:col-span-2 space-y-5">
           {player && (
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div className="card p-4 text-center">
                 <div className="text-3xl font-black font-condensed text-teal-400">{attendanceRate}%</div>
                 <div className="text-white/40 text-xs mt-1">Attendance Rate</div>
                 <div className="text-white/20 text-xs">{presentCount}/{totalCount} sessions</div>
               </div>
+              <Link href="/parent/leaderboard" className="card card-hover p-4 text-center">
+                <div className="text-3xl font-black font-condensed text-amber-400 flex items-center justify-center gap-1">
+                  <Trophy size={20}/>{totalPoints}
+                </div>
+                <div className="text-white/40 text-xs mt-1">Points</div>
+                <div className="text-white/20 text-xs">View leaderboard</div>
+              </Link>
               <div className="card p-4 text-center">
                 <div className={`text-3xl font-black font-condensed ${payment?.status === 'paid' ? 'text-green-400' : 'text-amber-400'}`}>
                   {payment?.status === 'paid' ? '✓' : '!'}

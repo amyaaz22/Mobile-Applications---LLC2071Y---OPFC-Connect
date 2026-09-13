@@ -12,6 +12,8 @@ export default function CoachProfilePage() {
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
   const [stats, setStats] = useState({ players: 0, sessions: 0, announcements: 0 })
+  const [clubInfo, setClubInfo] = useState<{ name?: string; location?: string; motto?: string }>({})
+  const [categories, setCategories] = useState<string[]>([])
 
   useEffect(() => {
     async function load() {
@@ -21,12 +23,16 @@ export default function CoachProfilePage() {
       setProfile(p)
       setName(p?.full_name ?? '')
 
-      const [{ count: pc }, { count: sc }, { count: ac }] = await Promise.all([
+      const [{ count: pc }, { count: sc }, { count: ac }, { data: info }, { data: cats }] = await Promise.all([
         supabase.from('players').select('*', { count: 'exact', head: true }).eq('is_active', true),
         supabase.from('training_sessions').select('*', { count: 'exact', head: true }),
         supabase.from('announcements').select('*', { count: 'exact', head: true }),
+        supabase.from('club_settings').select('value').eq('key', 'club_info').single(),
+        supabase.from('club_settings').select('value').eq('key', 'categories').single(),
       ])
       setStats({ players: pc ?? 0, sessions: sc ?? 0, announcements: ac ?? 0 })
+      if (info?.value) setClubInfo(info.value as any)
+      if (cats?.value) setCategories(cats.value as string[])
     }
     load()
   }, [])
@@ -106,10 +112,10 @@ export default function CoachProfilePage() {
         <h2 className="section-title mb-3">Club Information</h2>
         <div className="space-y-2">
           {[
-            ['Club', 'Oasis Pailles Football Club'],
-            ['Location', 'Morcellement Raffray, Pailles'],
-            ['Motto', 'Omnis Tactus, Officium'],
-            ['Categories', 'U9 · U13 · First Team'],
+            ['Club', clubInfo.name || '—'],
+            ['Location', clubInfo.location || '—'],
+            ['Motto', clubInfo.motto || '—'],
+            ['Categories', categories.length ? categories.join(' · ') : '—'],
           ].map(([label, value]) => (
             <div key={label} className="flex justify-between py-1.5 border-b border-white/5 last:border-0">
               <span className="text-white/40 text-sm">{label}</span>

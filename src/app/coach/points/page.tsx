@@ -2,7 +2,22 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'react-hot-toast'
-import { Plus, Trash2, Star, Gift, Save, ChevronDown, ChevronUp } from 'lucide-react'
+import { Plus, Trash2, Star, Gift, Sparkles } from 'lucide-react'
+
+function CategoryChips({ categories, selected, onToggle }: { categories: string[]; selected: string[]; onToggle: (c: string) => void }) {
+  const allCats = ['All', ...categories]
+  return (
+    <div className="flex gap-1.5 flex-wrap">
+      {allCats.map(c => (
+        <button key={c} type="button" onClick={() => onToggle(c)}
+          className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all
+            ${selected.includes(c) ? 'bg-teal-400/10 border-teal-400/30 text-teal-400' : 'border-white/10 text-white/50 hover:text-white'}`}>
+          {c}
+        </button>
+      ))}
+    </div>
+  )
+}
 
 export default function PointsPage() {
   const supabase = createClient()
@@ -13,20 +28,24 @@ export default function PointsPage() {
   const [loading, setLoading] = useState(true)
 
   // New rule form
-  const [newRule, setNewRule] = useState({ name: '', description: '', points: 1, icon: '⭐', category: 'All' })
+  const [newRule, setNewRule] = useState({ name: '', description: '', points: 1, icon: '⭐', category: ['All'] as string[] })
   const [showRuleForm, setShowRuleForm] = useState(false)
 
-  // Award points form
+  // Award points form (batch, rule-based)
   const [selectedSession, setSelectedSession] = useState('')
   const [selectedRule, setSelectedRule] = useState('')
   const [awardMap, setAwardMap] = useState<Record<string, boolean>>({})
   const [awarding, setAwarding] = useState(false)
 
+  // Custom award form (single player, arbitrary amount)
+  const [customAward, setCustomAward] = useState({ player_id: '', points: 5, reason: '' })
+  const [awardingCustom, setAwardingCustom] = useState(false)
+
   // Global award form
-  const [globalForm, setGlobalForm] = useState({ title: '', description: '', points: 2, target_category: 'All' })
+  const [globalForm, setGlobalForm] = useState({ title: '', description: '', points: 2, target_category: ['All'] as string[] })
   const [showGlobalForm, setShowGlobalForm] = useState(false)
 
-  const [categories, setCategories] = useState<string[]>(['All'])
+  const [categories, setCategories] = useState<string[]>([])
 
   useEffect(() => {
     loadAll()
@@ -51,18 +70,23 @@ export default function PointsPage() {
     setPlayers(p ?? [])
     setSessions(s ?? [])
     setGlobalAwards(g ?? [])
-    const cats = (settings?.value as any[])?.map((c: any) => c.name) ?? []
-    setCategories(['All', ...cats])
+    setCategories((settings?.value as string[]) ?? [])
     setLoading(false)
+  }
+
+  function toggleCategory(list: string[], set: (v: string[]) => void, c: string) {
+    if (c === 'All') { set(['All']); return }
+    const next = list.filter(x => x !== 'All')
+    set(next.includes(c) ? next.filter(x => x !== c) : [...next, c])
   }
 
   async function addRule() {
     if (!newRule.name) return
     const { data: { user } } = await supabase.auth.getUser()
-    const { error } = await supabase.from('point_rules').insert({ ...newRule, created_by: user?.id })
+    const { error } = await supabase.from('point_rules').insert({ ...newRule, category: newRule.category.length ? newRule.category : ['All'], created_by: user?.id })
     if (error) { toast.error('Failed to add rule'); return }
     toast.success('Rule added!')
-    setNewRule({ name: '', description: '', points: 1, icon: '⭐', category: 'All' })
+    setNewRule({ name: '', description: '', points: 1, icon: '⭐', category: ['All'] })
     setShowRuleForm(false)
     loadAll()
   }
@@ -99,13 +123,35 @@ export default function PointsPage() {
     setAwarding(false)
   }
 
+  async function awardCustomPoints() {
+    if (!customAward.player_id) { toast.error('Select a player'); return }
+    if (!customAward.points) { toast.error('Enter a point amount'); return }
+    if (!customAward.reason.trim()) { toast.error('Add a short reason — it shows in the player\'s history'); return }
+    setAwardingCustom(true)
+    const { data: { user } } = await supabase.auth.getUser()
+    const { error } = await supabase.from('player_points').insert({
+      player_id: customAward.player_id,
+      points: customAward.points,
+      note: customAward.reason.trim(),
+      awarded_by: user?.id,
+    })
+    setAwardingCustom(false)
+    if (error) { toast.error('Failed to award points'); return }
+    toast.success(`${customAward.points} pts awarded!`)
+    setCustomAward({ player_id: '', points: 5, reason: '' })
+  }
+
   async function addGlobalAward() {
     if (!globalForm.title) return
     const { data: { user } } = await supabase.auth.getUser()
-    const { error } = await supabase.from('global_awards').insert({ ...globalForm, awarded_by: user?.id })
+    const { error } = await supabase.from('global_awards').insert({
+      ...globalForm,
+      target_category: globalForm.target_category.length ? globalForm.target_category : ['All'],
+      awarded_by: user?.id,
+    })
     if (error) { toast.error('Failed'); return }
     toast.success('Global award given to all players!')
-    setGlobalForm({ title: '', description: '', points: 2, target_category: 'All' })
+    setGlobalForm({ title: '', description: '', points: 2, target_category: ['All'] })
     setShowGlobalForm(false)
     loadAll()
   }
@@ -155,10 +201,9 @@ export default function PointsPage() {
                 <input className="input" placeholder="Optional description" value={newRule.description} onChange={e => setNewRule(n => ({ ...n, description: e.target.value }))}/>
               </div>
               <div>
-                <label className="label mb-1 block">Applies to</label>
-                <select className="input" value={newRule.category} onChange={e => setNewRule(n => ({ ...n, category: e.target.value }))}>
-                  {categories.map(c => <option key={c}>{c}</option>)}
-                </select>
+                <label className="label mb-1.5 block">Applies to</label>
+                <CategoryChips categories={categories} selected={newRule.category}
+                  onToggle={c => toggleCategory(newRule.category, v => setNewRule(n => ({ ...n, category: v })), c)}/>
               </div>
               <div className="flex gap-2">
                 <button onClick={addRule} className="btn-primary flex-1 text-sm">Add Rule</button>
@@ -168,20 +213,23 @@ export default function PointsPage() {
           )}
 
           <div className="space-y-2">
-            {rules.map(rule => (
-              <div key={rule.id} className="card p-4 flex items-center gap-3">
-                <span className="text-2xl flex-shrink-0">{rule.icon}</span>
-                <div className="flex-1">
-                  <p className="text-white font-semibold text-sm">{rule.name}</p>
-                  {rule.description && <p className="text-white/30 text-xs">{rule.description}</p>}
-                  {rule.category !== 'All' && <p className="text-teal-400/60 text-xs">{rule.category} only</p>}
+            {rules.map(rule => {
+              const cats: string[] = rule.category ?? ['All']
+              return (
+                <div key={rule.id} className="card p-4 flex items-center gap-3">
+                  <span className="text-2xl flex-shrink-0">{rule.icon}</span>
+                  <div className="flex-1">
+                    <p className="text-white font-semibold text-sm">{rule.name}</p>
+                    {rule.description && <p className="text-white/30 text-xs">{rule.description}</p>}
+                    {!cats.includes('All') && <p className="text-teal-400/60 text-xs">{cats.join(', ')} only</p>}
+                  </div>
+                  <span className="text-teal-400 font-black text-lg">+{rule.points}</span>
+                  <button onClick={() => deleteRule(rule.id)} className="text-white/20 hover:text-red-400 transition-colors p-1">
+                    <Trash2 size={14}/>
+                  </button>
                 </div>
-                <span className="text-teal-400 font-black text-lg">+{rule.points}</span>
-                <button onClick={() => deleteRule(rule.id)} className="text-white/20 hover:text-red-400 transition-colors p-1">
-                  <Trash2 size={14}/>
-                </button>
-              </div>
-            ))}
+              )
+            })}
           </div>
 
           {/* Global awards */}
@@ -192,7 +240,7 @@ export default function PointsPage() {
                 <Gift size={14}/> Award All
               </button>
             </div>
-            <p className="text-white/30 text-xs mb-3">Give points to all players in a group at once (e.g. attending a talk)</p>
+            <p className="text-white/30 text-xs mb-3">Give points to all players in one or more groups at once (e.g. attending a talk)</p>
 
             {showGlobalForm && (
               <div className="card p-4 mb-4 space-y-3">
@@ -200,17 +248,14 @@ export default function PointsPage() {
                   <label className="label mb-1 block">Award Title *</label>
                   <input className="input" placeholder="e.g. Attended Coach Talk" value={globalForm.title} onChange={e => setGlobalForm(g => ({ ...g, title: e.target.value }))}/>
                 </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="label mb-1 block">Points</label>
-                    <input type="number" className="input" value={globalForm.points} onChange={e => setGlobalForm(g => ({ ...g, points: +e.target.value }))} min={1}/>
-                  </div>
-                  <div>
-                    <label className="label mb-1 block">Group</label>
-                    <select className="input" value={globalForm.target_category} onChange={e => setGlobalForm(g => ({ ...g, target_category: e.target.value }))}>
-                      {categories.map(c => <option key={c}>{c}</option>)}
-                    </select>
-                  </div>
+                <div>
+                  <label className="label mb-1 block">Points</label>
+                  <input type="number" className="input" value={globalForm.points} onChange={e => setGlobalForm(g => ({ ...g, points: +e.target.value }))} min={1}/>
+                </div>
+                <div>
+                  <label className="label mb-1.5 block">Group(s)</label>
+                  <CategoryChips categories={categories} selected={globalForm.target_category}
+                    onToggle={c => toggleCategory(globalForm.target_category, v => setGlobalForm(g => ({ ...g, target_category: v })), c)}/>
                 </div>
                 <div className="flex gap-2">
                   <button onClick={addGlobalAward} className="btn-primary flex-1 text-sm">Give Award to All</button>
@@ -225,7 +270,7 @@ export default function PointsPage() {
                   <Gift size={16} className="text-purple-400 flex-shrink-0"/>
                   <div className="flex-1">
                     <p className="text-white text-sm font-semibold">{g.title}</p>
-                    <p className="text-white/30 text-xs">{g.target_category} · {new Date(g.awarded_at).toLocaleDateString('en', { day: 'numeric', month: 'short' })}</p>
+                    <p className="text-white/30 text-xs">{(g.target_category ?? ['All']).join(', ')} · {new Date(g.awarded_at).toLocaleDateString('en', { day: 'numeric', month: 'short' })}</p>
                   </div>
                   <span className="text-purple-400 font-bold">+{g.points}</span>
                 </div>
@@ -236,7 +281,7 @@ export default function PointsPage() {
 
         {/* RIGHT: Award points */}
         <div>
-          <h2 className="section-title mb-3">Award Points</h2>
+          <h2 className="section-title mb-3">Award Points (Batch)</h2>
           <div className="card p-5 space-y-4">
             <div>
               <label className="label mb-1.5 block">Session (optional)</label>
@@ -297,6 +342,34 @@ export default function PointsPage() {
               className="btn-primary w-full flex items-center justify-center gap-2">
               <Star size={16}/>
               {awarding ? 'Awarding…' : `Award Points to ${Object.values(awardMap).filter(Boolean).length} Player(s)`}
+            </button>
+          </div>
+
+          {/* Custom one-off award */}
+          <h2 className="section-title mb-3 mt-6">One-Off Award</h2>
+          <p className="text-white/30 text-xs mb-3 -mt-2">Not covered by a rule? Award a custom amount to one player with a reason.</p>
+          <div className="card p-5 space-y-4">
+            <div>
+              <label className="label mb-1.5 block">Player *</label>
+              <select className="input" value={customAward.player_id} onChange={e => setCustomAward(c => ({ ...c, player_id: e.target.value }))}>
+                <option value="">Select player…</option>
+                {players.map(p => <option key={p.id} value={p.id}>{p.full_name} — {p.category}</option>)}
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="label mb-1.5 block">Points *</label>
+                <input type="number" className="input" value={customAward.points} onChange={e => setCustomAward(c => ({ ...c, points: +e.target.value }))}/>
+              </div>
+            </div>
+            <div>
+              <label className="label mb-1.5 block">Reason *</label>
+              <input className="input" placeholder="e.g. Man of the match vs Curepipe" value={customAward.reason} onChange={e => setCustomAward(c => ({ ...c, reason: e.target.value }))}/>
+            </div>
+            <button onClick={awardCustomPoints} disabled={awardingCustom}
+              className="btn-primary w-full flex items-center justify-center gap-2">
+              <Sparkles size={16}/>
+              {awardingCustom ? 'Awarding…' : 'Give One-Off Award'}
             </button>
           </div>
         </div>

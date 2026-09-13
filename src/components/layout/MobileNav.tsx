@@ -2,14 +2,14 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/lib/utils'
-import { Home, Users, CalendarDays, BarChart3, QrCode, CreditCard, Wallet, TrendingUp } from 'lucide-react'
+import { Home, Users, CalendarDays, BarChart3, QrCode, CreditCard, PiggyBank, TrendingUp } from 'lucide-react'
 
 const coachItems = [
   { href: '/coach', label: 'Home', icon: Home },
   { href: '/coach/players', label: 'Players', icon: Users },
   { href: '/scan', label: 'Scan', icon: QrCode },
   { href: '/coach/analytics', label: 'Analytics', icon: TrendingUp },
-  { href: '/coach/payments', label: 'Fees', icon: Wallet },
+  { href: '/coach/finance', label: 'Finance', icon: PiggyBank },
 ]
 
 const parentItems = [

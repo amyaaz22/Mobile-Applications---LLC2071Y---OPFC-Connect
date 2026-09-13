@@ -3,9 +3,9 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useParams, useRouter } from 'next/navigation'
 import PassCard from '@/components/cards/PassCard'
-import { categoryColor, formatDate, getAge, getCurrentMonth } from '@/lib/utils'
+import { categoryColor, formatDate, getAge, getCurrentMonth, paymentStatusColor } from '@/lib/utils'
 import { toast } from 'react-hot-toast'
-import { ArrowLeft, Edit3, Save } from 'lucide-react'
+import { ArrowLeft, Edit3, Save, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import QRCode from 'qrcode'
 
@@ -28,15 +28,21 @@ export default function PlayerDetailPage() {
   const [saving, setSaving] = useState(false)
   const [qrUrl, setQrUrl] = useState('')
   const [attendance, setAttendance] = useState<any[]>([])
+  const [clubInfo, setClubInfo] = useState<{ logo_url?: string; name?: string }>({})
 
   useEffect(() => {
     fetchPlayer()
   }, [params.id])
 
+  useEffect(() => {
+    supabase.from('club_settings').select('value').eq('key', 'club_info').single()
+      .then(({ data }) => { if (data?.value) setClubInfo(data.value as any) })
+  }, [])
+
   async function fetchPlayer() {
     const { data: p } = await supabase
       .from('players')
-      .select(`*, guardian:guardians(*), stats:player_stats(*), payments(*)`)
+      .select(`*, guardian:guardians(*), stats:player_stats(*), payments(*), points:player_points(*, rule:point_rules(name, icon))`)
       .eq('id', params.id as string)
       .single()
 
@@ -68,6 +74,13 @@ export default function PlayerDetailPage() {
       .order('scanned_at', { ascending: false })
       .limit(10)
     setAttendance(att ?? [])
+  }
+
+  async function deleteAward(id: string) {
+    if (!confirm('Remove this points award? This cannot be undone.')) return
+    await supabase.from('player_points').delete().eq('id', id)
+    toast.success('Award removed')
+    fetchPlayer()
   }
 
   async function saveStats() {
@@ -133,7 +146,8 @@ export default function PlayerDetailPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Pass Card (front + back PDF) */}
         <div className="flex flex-col items-center gap-4">
-          <PassCard player={player} qrUrl={qrUrl}/>
+          <PassCard player={player} qrUrl={qrUrl} logoUrl={clubInfo.logo_url} clubName={clubInfo.name}
+            guardianPhone={(Array.isArray(player.guardian) ? player.guardian[0] : player.guardian)?.phone_primary}/>
         </div>
 
         {/* Middle: Info + Stats */}
@@ -192,6 +206,68 @@ export default function PlayerDetailPage() {
               </div>
             </div>
           )}
+
+          {/* Payment history */}
+          <div className="card p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="section-title">Payment History</h2>
+              <Link href="/coach/payments" className="text-teal-400 text-xs hover:underline">Record payment →</Link>
+            </div>
+            {!player.payments?.length ? (
+              <p className="text-white/30 text-sm text-center py-4">No payments recorded yet</p>
+            ) : (
+              <div className="space-y-2">
+                {[...player.payments].sort((a: any, b: any) => b.created_at.localeCompare(a.created_at)).map((p: any) => (
+                  <div key={p.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+                    <div>
+                      <p className="text-white text-sm font-medium capitalize">{p.type}{p.month ? ` · ${p.month}` : ''}</p>
+                      <p className="text-white/30 text-xs">{formatDate(p.created_at)}{p.method ? ` · ${p.method}` : ''}{p.notes ? ` · ${p.notes}` : ''}</p>
+                    </div>
+                    <div className="text-right flex items-center gap-2">
+                      <span className="text-white font-semibold text-sm">Rs {p.amount}</span>
+                      <span className={`badge text-xs ${paymentStatusColor(p.status)}`}>{p.status}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Points history */}
+          <div className="card p-5">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="section-title">Points History</h2>
+              <div className="flex items-center gap-3">
+                <span className="text-teal-400 font-bold text-sm">
+                  {(player.points ?? []).reduce((s: number, a: any) => s + a.points, 0)} pts total
+                </span>
+                <Link href="/coach/points" className="text-teal-400 text-xs hover:underline">Award points →</Link>
+              </div>
+            </div>
+            {!player.points?.length ? (
+              <p className="text-white/30 text-sm text-center py-4">No points awarded yet</p>
+            ) : (
+              <div className="space-y-2">
+                {[...player.points].sort((a: any, b: any) => b.awarded_at.localeCompare(a.awarded_at)).map((a: any) => (
+                  <div key={a.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">{a.rule?.icon ?? '⭐'}</span>
+                      <div>
+                        <p className="text-white text-sm font-medium">{a.rule?.name ?? a.note ?? 'One-off award'}</p>
+                        <p className="text-white/30 text-xs">{formatDate(a.awarded_at)}{a.rule?.name && a.note ? ` · ${a.note}` : ''}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-teal-400 font-bold text-sm">+{a.points}</span>
+                      <button onClick={() => deleteAward(a.id)} className="text-white/20 hover:text-red-400 transition-colors p-1">
+                        <Trash2 size={13}/>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
 
           {/* Stats editor */}
           <div className="card p-5">

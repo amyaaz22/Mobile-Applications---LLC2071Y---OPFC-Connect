@@ -4,10 +4,12 @@ import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { Player } from '@/types/database'
 import { categoryColor, getAge, formatDate } from '@/lib/utils'
-import { Plus, Search, Filter, Users } from 'lucide-react'
+import { Plus, Search, Filter, Users, Download } from 'lucide-react'
 import PlayerCard from '@/components/cards/PlayerCard'
+import { toast } from 'react-hot-toast'
+import * as XLSX from 'xlsx'
 
-const CATEGORIES = ['All', 'U9', 'U13', 'First Team']
+const FALLBACK_CATEGORIES = ['U9', 'U13', 'First Team']
 
 export default function PlayersPage() {
   const supabase = createClient()
@@ -16,6 +18,67 @@ export default function PlayersPage() {
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('All')
   const [viewMode, setViewMode] = useState<'list' | 'cards'>('list')
+  const [categories, setCategories] = useState<string[]>(FALLBACK_CATEGORIES)
+  const [scopedCategories, setScopedCategories] = useState<string[]>([])
+  const [exporting, setExporting] = useState(false)
+
+  useEffect(() => {
+    supabase.from('club_settings').select('value').eq('key', 'categories').single()
+      .then(({ data }) => { if (data?.value) setCategories(data.value as string[]) })
+    // Soft UI scoping: if this coach is limited to specific categories, only
+    // offer those here. Not an RLS boundary — see CLAUDE.md.
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!user) return
+      supabase.from('profiles').select('assigned_categories').eq('id', user.id).single()
+        .then(({ data }) => { if (data?.assigned_categories?.length) setScopedCategories(data.assigned_categories) })
+    })
+  }, [])
+
+  const visibleCategories = scopedCategories.length ? scopedCategories : categories
+
+  async function exportToExcel() {
+    setExporting(true)
+    try {
+      const { data, error } = await supabase
+        .from('players')
+        .select('*, guardian:guardians(*)')
+        .eq('is_active', true)
+        .order('full_name')
+      if (error || !data) { toast.error('Export failed'); return }
+
+      const rows = data.map((p: any) => {
+        const g = Array.isArray(p.guardian) ? p.guardian[0] : p.guardian
+        const [y, m, d] = String(p.date_of_birth).split('-')
+        return {
+          'Full Name': p.full_name,
+          'Date of Birth (DD/MM/YYYY)': d && m && y ? `${d}/${m}/${y}` : '',
+          'Category': p.category,
+          'Position (GK / DEF / MID / FWD)': p.position,
+          'Nationality': p.nationality ?? '',
+          'School / Grade': p.school ?? '',
+          'Address': p.address ?? '',
+          'Medical Notes': p.medical_notes ?? '',
+          'Guardian Full Name': g?.full_name ?? '',
+          'Guardian Relationship': g?.relationship ?? '',
+          'Guardian Phone (WhatsApp)': g?.phone_primary ?? '',
+          'Guardian Email': g?.email ?? '',
+        }
+      })
+
+      const wb = XLSX.utils.book_new()
+      const ws = XLSX.utils.json_to_sheet(rows)
+      ws['!cols'] = [
+        { wch: 24 }, { wch: 22 }, { wch: 16 }, { wch: 28 },
+        { wch: 14 }, { wch: 30 }, { wch: 28 }, { wch: 22 },
+        { wch: 22 }, { wch: 22 }, { wch: 22 }, { wch: 24 },
+      ]
+      XLSX.utils.book_append_sheet(wb, ws, 'Players')
+      XLSX.writeFile(wb, `OPFC_Players_${new Date().toISOString().split('T')[0]}.xlsx`)
+      toast.success(`${rows.length} players exported`)
+    } finally {
+      setExporting(false)
+    }
+  }
 
   useEffect(() => {
     async function fetchPlayers() {
@@ -27,6 +90,7 @@ export default function PlayersPage() {
         .order('full_name')
 
       if (category !== 'All') query = query.eq('category', category)
+      else if (scopedCategories.length) query = query.in('category', scopedCategories)
       if (search) query = query.ilike('full_name', `%${search}%`)
 
       const { data } = await query
@@ -37,7 +101,7 @@ export default function PlayersPage() {
       setLoading(false)
     }
     fetchPlayers()
-  }, [search, category])
+  }, [search, category, scopedCategories])
 
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto">
@@ -48,6 +112,10 @@ export default function PlayersPage() {
           <p className="text-white/30 text-sm mt-1">{players.length} active players</p>
         </div>
         <div className="flex gap-2">
+          <button onClick={exportToExcel} disabled={exporting}
+            className="btn-secondary flex items-center gap-2 self-start text-sm">
+            <Download size={14}/> {exporting ? 'Exporting…' : 'Export'}
+          </button>
           <Link href="/coach/players/import" className="btn-secondary flex items-center gap-2 self-start text-sm">
             <span>↑</span> Import
           </Link>
@@ -70,7 +138,7 @@ export default function PlayersPage() {
           />
         </div>
         <div className="flex gap-2">
-          {CATEGORIES.map(cat => (
+          {['All', ...visibleCategories].map(cat => (
             <button key={cat} onClick={() => setCategory(cat)}
               className={`px-4 py-2.5 rounded-xl text-sm font-semibold transition-all border
                 ${category === cat

@@ -1,12 +1,14 @@
 'use client'
 import Link from 'next/link'
+import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
 import {
   Users, CreditCard, CalendarDays, BarChart3, Megaphone,
   Wallet, LogOut, QrCode, Home, ChevronRight, UserCircle,
-  Settings, TrendingUp, Trophy, Star
+  Settings, TrendingUp, Trophy, Star, PiggyBank, Receipt,
+  HeartHandshake, Package, ShieldCheck
 } from 'lucide-react'
 
 const coachNav = [
@@ -18,10 +20,18 @@ const coachNav = [
   { href: '/coach/leaderboard', label: 'Leaderboard', icon: <Trophy size={18}/> },
   { href: '/coach/points', label: 'Points', icon: <Star size={18}/> },
   { href: '/coach/announcements', label: 'Announcements', icon: <Megaphone size={18}/> },
+  { href: '/coach/finance', label: 'Finance', icon: <PiggyBank size={18}/> },
   { href: '/coach/payments', label: 'Payments', icon: <Wallet size={18}/> },
+  { href: '/coach/income', label: 'Income & Donations', icon: <HeartHandshake size={18}/> },
+  { href: '/coach/expenses', label: 'Expenses', icon: <Receipt size={18}/> },
+  { href: '/coach/inventory', label: 'Inventory', icon: <Package size={18}/> },
   { href: '/scan', label: 'QR Scanner', icon: <QrCode size={18}/> },
   { href: '/coach/settings', label: 'Club Settings', icon: <Settings size={18}/> },
   { href: '/coach/profile', label: 'Profile', icon: <UserCircle size={18}/> },
+]
+
+const adminOnlyNav = [
+  { href: '/coach/staff', label: 'Staff & Parents', icon: <ShieldCheck size={18}/> },
 ]
 
 const parentNav = [
@@ -43,8 +53,15 @@ const playerNav = [
 export default function Sidebar({ role, userName }: { role: string; userName: string }) {
   const pathname = usePathname()
   const supabase = createClient()
-  const nav = role === 'coach' || role === 'admin' ? coachNav
+  const nav = role === 'coach' || role === 'admin'
+    ? [...coachNav, ...(role === 'admin' ? adminOnlyNav : [])]
     : role === 'parent' ? parentNav : playerNav
+  const [clubInfo, setClubInfo] = useState<{ logo_url?: string; name?: string }>({})
+
+  useEffect(() => {
+    supabase.from('club_settings').select('value').eq('key', 'club_info').single()
+      .then(({ data }) => { if (data?.value) setClubInfo(data.value as any) })
+  }, [])
 
   async function handleLogout() {
     await supabase.auth.signOut()
@@ -55,8 +72,12 @@ export default function Sidebar({ role, userName }: { role: string; userName: st
     <aside className="hidden md:flex flex-col w-64 h-screen bg-[#091520] border-r border-white/5 fixed left-0 top-0 z-40 overflow-hidden">
       <div className="p-5 border-b border-white/5 flex-shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-full bg-teal-400 flex items-center justify-center flex-shrink-0">
-            <span className="text-[#0D1B2A] font-black text-xs">OPFC</span>
+          <div className="w-10 h-10 rounded-full bg-teal-400 flex items-center justify-center flex-shrink-0 overflow-hidden">
+            {clubInfo.logo_url ? (
+              <img src={clubInfo.logo_url} alt="Club logo" className="w-full h-full object-contain p-1"/>
+            ) : (
+              <span className="text-[#0D1B2A] font-black text-xs">OPFC</span>
+            )}
           </div>
           <div>
             <div className="font-bold text-white text-sm">OPFC Connect</div>
