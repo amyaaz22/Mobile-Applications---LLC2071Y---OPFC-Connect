@@ -15,7 +15,11 @@ export function usePermissionGuard(area: PermissionArea) {
     const supabase = createClient()
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) { router.replace('/login'); return }
-      supabase.from('profiles').select('role, permissions').eq('id', user.id).single()
+      // select('*') so a pending migration (missing profiles.permissions)
+      // fails open here rather than throwing — CoachGuard already gated
+      // entry as coach/admin, so worst case a narrowed admin briefly keeps
+      // access they should lose, not a broken page.
+      supabase.from('profiles').select('*').eq('id', user.id).single()
         .then(({ data }) => {
           if (data?.role === 'admin' && !hasPermission(data, area)) { router.replace('/unauthorized'); return }
           setChecked(true)

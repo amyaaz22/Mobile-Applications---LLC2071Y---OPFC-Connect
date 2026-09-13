@@ -37,7 +37,7 @@ export default function PlayersPage() {
     // offer those here. Not an RLS boundary — see CLAUDE.md.
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) return
-      supabase.from('profiles').select('assigned_categories').eq('id', user.id).single()
+      supabase.from('profiles').select('*').eq('id', user.id).single()
         .then(({ data }) => { if (data?.assigned_categories?.length) setScopedCategories(data.assigned_categories) })
     })
   }, [])

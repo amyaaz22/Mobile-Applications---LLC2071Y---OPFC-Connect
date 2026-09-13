@@ -12,8 +12,16 @@ export default function CoachGuard({ children }: { children: React.ReactNode }) 
     const supabase = createClient()
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!session) { window.location.replace('/login'); return }
-      supabase.from('profiles').select('role, full_name, permissions').eq('id', session.user.id).single()
-        .then(({ data }) => {
+      // select('*') rather than naming columns: this guard runs in front of
+      // every /coach/* page, so it must not break if a newer migration
+      // (e.g. profiles.permissions, schema_v4) hasn't been applied yet —
+      // an unrecognized-column error here used to bounce straight back to
+      // /login with no explanation.
+      supabase.from('profiles').select('*').eq('id', session.user.id).single()
+        .then(({ data, error }) => {
+          if (error) {
+            console.error('CoachGuard: failed to load profile — likely a pending Supabase migration', error)
+          }
           if (!data || !['admin', 'coach'].includes(data.role)) {
             window.location.replace('/login')
             return
