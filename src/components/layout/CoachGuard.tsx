@@ -45,7 +45,7 @@ export default function CoachGuard({ children }: { children: React.ReactNode }) 
   return (
     <div className="min-h-screen">
       <Sidebar role={profile!.role} userName={profile!.full_name} permissions={profile!.permissions}/>
-      <MobileNav role={profile!.role}/>
+      <MobileNav role={profile!.role} permissions={profile!.permissions}/>
       <main className="md:ml-64 pb-20 md:pb-0 min-h-screen">{children}</main>
     </div>
   )

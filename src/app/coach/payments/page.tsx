@@ -16,7 +16,7 @@ function RecordPaymentModal({ players, entryFee, feeFor, methods, onClose, onSav
   const supabase = createClient()
   const [form, setForm] = useState({
     player_id: '', type: 'monthly', month: getCurrentMonth(),
-    amount: '', method: 'Cash', status: 'paid', notes: '',
+    amount: '', method: 'Cash', status: 'paid', notes: '', reference: '',
   })
   const [saving, setSaving] = useState(false)
   const player = players.find(p => p.id === form.player_id)
@@ -42,6 +42,7 @@ function RecordPaymentModal({ players, entryFee, feeFor, methods, onClose, onSav
       method: form.method,
       status: form.status,
       notes: form.notes || null,
+      reference: form.reference || null,
       confirmed_by: form.status === 'paid' ? user?.id : null,
       confirmed_at: form.status === 'paid' ? new Date().toISOString() : null,
     })
@@ -112,6 +113,11 @@ function RecordPaymentModal({ players, entryFee, feeFor, methods, onClose, onSav
               <option value="pending">Pending</option>
             </select>
           </div>
+        </div>
+
+        <div>
+          <label className="label mb-1.5 block">Transaction Reference (optional)</label>
+          <input className="input" value={form.reference} onChange={e => set('reference', e.target.value)} placeholder="e.g. bank transfer ref, Juice transaction ID…"/>
         </div>
 
         <div>
@@ -223,12 +229,13 @@ export default function PaymentsPage() {
       'Month': p.month ?? '',
       'Amount (Rs)': p.amount,
       'Method': p.method ?? '',
+      'Reference': p.reference ?? '',
       'Status': p.status,
       'Notes': p.notes ?? '',
     }))
     const wb = XLSX.utils.book_new()
     const ws = XLSX.utils.json_to_sheet(rows)
-    ws['!cols'] = [{ wch: 14 }, { wch: 22 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 18 }, { wch: 10 }, { wch: 30 }]
+    ws['!cols'] = [{ wch: 14 }, { wch: 22 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 18 }, { wch: 20 }, { wch: 10 }, { wch: 30 }]
     XLSX.utils.book_append_sheet(wb, ws, 'Payments')
     XLSX.writeFile(wb, `OPFC_Payments_${new Date().toISOString().split('T')[0]}.xlsx`)
     toast.success(`${rows.length} payments exported`)
@@ -382,14 +389,14 @@ export default function PaymentsPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-white/5">
-                  {['Date', 'Player', 'Type', 'Month', 'Amount', 'Method', 'Status', 'Notes'].map(h => (
+                  {['Date', 'Player', 'Type', 'Month', 'Amount', 'Method', 'Reference', 'Status', 'Notes'].map(h => (
                     <th key={h} className="text-left px-4 py-3 text-xs font-bold text-white/30 uppercase whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {filteredLedger.length === 0 ? (
-                  <tr><td colSpan={8} className="text-center py-10 text-white/30">No payments recorded yet</td></tr>
+                  <tr><td colSpan={9} className="text-center py-10 text-white/30">No payments recorded yet</td></tr>
                 ) : filteredLedger.map((p, i) => (
                   <tr key={p.id} className={`border-b border-white/5 ${i % 2 === 0 ? '' : 'bg-white/2'}`}>
                     <td className="px-4 py-3 text-white/50 text-xs whitespace-nowrap">{formatDate(p.created_at)}</td>
@@ -401,6 +408,7 @@ export default function PaymentsPage() {
                     <td className="px-4 py-3 text-white/60 text-sm">{p.month ?? '—'}</td>
                     <td className="px-4 py-3 text-white font-semibold text-sm whitespace-nowrap">Rs {p.amount}</td>
                     <td className="px-4 py-3 text-white/50 text-xs">{p.method ?? '—'}</td>
+                    <td className="px-4 py-3 text-white/40 text-xs font-mono max-w-[140px] truncate">{p.reference ?? '—'}</td>
                     <td className="px-4 py-3"><span className={`badge text-xs ${paymentStatusColor(p.status)}`}>{p.status}</span></td>
                     <td className="px-4 py-3 text-white/40 text-xs max-w-[180px] truncate">{p.notes ?? '—'}</td>
                   </tr>

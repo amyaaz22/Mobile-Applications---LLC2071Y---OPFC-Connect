@@ -5,14 +5,16 @@ import Link from 'next/link'
 import { formatDate, formatTime, categoryColor } from '@/lib/utils'
 import { Plus, CalendarDays, Clock, MapPin, Users, CheckCircle, RotateCcw } from 'lucide-react'
 import { toast } from 'react-hot-toast'
+import { useScopedCategories } from '@/hooks/useScopedCategories'
 
 export default function SessionsPage() {
   const supabase = createClient()
   const [sessions, setSessions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<'upcoming' | 'past'>('upcoming')
+  const { inScope } = useScopedCategories([])
 
-  useEffect(() => { fetchSessions() }, [tab])
+  useEffect(() => { fetchSessions() }, [tab, inScope])
 
   async function toggleSessionStatus(sessionId: string, currentStatus: string) {
     const newStatus = currentStatus === 'done' ? 'upcoming' : 'done'
@@ -34,7 +36,7 @@ export default function SessionsPage() {
     else query = query.lt('date', today).limit(20)
 
     const { data } = await query
-    setSessions(data ?? [])
+    setSessions((data ?? []).filter(s => inScope(s.category)))
     setLoading(false)
   }
 
