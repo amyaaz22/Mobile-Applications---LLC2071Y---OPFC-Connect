@@ -154,6 +154,7 @@ export default function StaffPage() {
   }
 
   async function togglePermission(profileId: string, current: string[] | null, area: string) {
+    if (profileId === viewerId) { toast.error('You can\'t narrow your own access — ask another unrestricted admin'); return }
     const list = current ?? []
     const next = list.includes(area) ? list.filter(a => a !== area) : [...list, area]
     const { error } = await supabase.from('profiles').update({ permissions: next.length ? next : null }).eq('id', profileId)
@@ -401,15 +402,17 @@ export default function StaffPage() {
                         {(c.permissions?.length ?? 0) === 0
                           ? 'Unrestricted — full access to everything.'
                           : 'Restricted to:'}
-                        {!viewerIsFullAdmin && ' Only an unrestricted admin can change this.'}
+                        {c.id === viewerId
+                          ? ' You can\'t narrow your own access — ask another unrestricted admin.'
+                          : !viewerIsFullAdmin && ' Only an unrestricted admin can change this.'}
                       </p>
                       <div className="flex gap-1.5 flex-wrap">
                         {PERMISSION_AREAS.map(({ key, label }) => (
-                          <button key={key} disabled={!viewerIsFullAdmin}
+                          <button key={key} disabled={!viewerIsFullAdmin || c.id === viewerId}
                             onClick={() => togglePermission(c.id, c.permissions, key)}
                             className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all disabled:opacity-40 disabled:cursor-not-allowed
                               ${(c.permissions ?? []).includes(key) ? 'bg-purple-400/10 border-purple-400/30 text-purple-300' : 'border-white/10 text-white/40 hover:text-white'}`}
-                            title={label}>
+                            title={c.id === viewerId ? 'Can\'t change your own permissions' : label}>
                             {label}
                           </button>
                         ))}
