@@ -6,9 +6,11 @@ import { formatDate, formatTime, categoryColor } from '@/lib/utils'
 import { Plus, CalendarDays, Clock, MapPin, Users, CheckCircle, RotateCcw } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { useScopedCategories } from '@/hooks/useScopedCategories'
+import { usePermissionGuard } from '@/hooks/usePermissionGuard'
 
 export default function SessionsPage() {
   const supabase = createClient()
+  const permitted = usePermissionGuard('sessions')
   const [sessions, setSessions] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<'upcoming' | 'past'>('upcoming')
@@ -41,6 +43,12 @@ export default function SessionsPage() {
   }
 
   const sessionTypeIcon = (type: string) => type === 'match' ? '⚽' : type === 'tournament' ? '🏆' : '🏃'
+
+  if (!permitted) return (
+    <div className="flex items-center justify-center min-h-screen text-white/30">
+      <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>
+    </div>
+  )
 
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto">

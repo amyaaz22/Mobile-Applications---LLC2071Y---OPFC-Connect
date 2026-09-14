@@ -4,9 +4,11 @@ import { createClient } from '@/lib/supabase/client'
 import { formatDate, categoryColor } from '@/lib/utils'
 import { BarChart3, Download } from 'lucide-react'
 import { useScopedCategories } from '@/hooks/useScopedCategories'
+import { usePermissionGuard } from '@/hooks/usePermissionGuard'
 
 export default function AttendancePage() {
   const supabase = createClient()
+  const permitted = usePermissionGuard('attendance')
   const [sessions, setSessions] = useState<any[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [attendance, setAttendance] = useState<any[]>([])
@@ -42,6 +44,12 @@ export default function AttendancePage() {
   const presentIds = new Set(attendance.filter(a => a.status === 'present').map(a => a.player_id))
   const relevantPlayers = allPlayers.filter(p => !selectedSession?.category || selectedSession.category === 'All' || p.category === selectedSession.category)
   const presentCount = relevantPlayers.filter(p => presentIds.has(p.id)).length
+
+  if (!permitted) return (
+    <div className="flex items-center justify-center min-h-screen text-white/30">
+      <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>
+    </div>
+  )
 
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto">

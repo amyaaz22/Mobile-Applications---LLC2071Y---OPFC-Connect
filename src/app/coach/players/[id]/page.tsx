@@ -8,6 +8,7 @@ import { toast } from 'react-hot-toast'
 import { ArrowLeft, Edit3, Save, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import QRCode from 'qrcode'
+import { usePermissionGuard } from '@/hooks/usePermissionGuard'
 
 const STAT_KEYS = ['pac', 'sho', 'pas', 'dri', 'def', 'phy'] as const
 const STAT_LABELS: Record<string, string> = {
@@ -19,6 +20,7 @@ export default function PlayerDetailPage() {
   const params = useParams()
   const router = useRouter()
   const supabase = createClient()
+  const permitted = usePermissionGuard('players')
   const [player, setPlayer] = useState<any>(null)
   const [stats, setStats] = useState<any>(null)
   const [editStats, setEditStats] = useState(false)
@@ -126,7 +128,7 @@ export default function PlayerDetailPage() {
     pdf.save(`OPFC_AttCard_${player?.player_code}.pdf`)
   }
 
-  if (!player) return (
+  if (!permitted || !player) return (
     <div className="flex items-center justify-center min-h-screen text-white/30">
       <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>
     </div>

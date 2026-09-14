@@ -5,9 +5,12 @@ import Link from 'next/link'
 import { toast } from 'react-hot-toast'
 import { Plus, ClipboardList, Trash2, Copy, Users } from 'lucide-react'
 import { formatDate, categoryColor } from '@/lib/utils'
+import { usePermissionGuard } from '@/hooks/usePermissionGuard'
+import { logAudit } from '@/lib/audit'
 
 export default function DrillsPage() {
   const supabase = createClient()
+  const permitted = usePermissionGuard('field_sheets')
   const [sheets, setSheets] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -36,12 +39,19 @@ export default function DrillsPage() {
     fetchSheets()
   }
 
-  async function remove(id: string) {
+  async function remove(id: string, title: string) {
     if (!confirm('Delete this field sheet? This cannot be undone.')) return
     await supabase.from('field_sheets').delete().eq('id', id)
+    logAudit(supabase, { action: 'delete', entity: 'field_sheet', entity_id: id, summary: `Deleted field sheet "${title}"` })
     toast.success('Deleted')
     fetchSheets()
   }
+
+  if (!permitted) return (
+    <div className="flex items-center justify-center min-h-screen text-white/30">
+      <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>
+    </div>
+  )
 
   return (
     <div className="p-4 md:p-8 max-w-4xl mx-auto">
@@ -81,7 +91,7 @@ export default function DrillsPage() {
               <button onClick={() => duplicate(s)} className="text-white/20 hover:text-teal-400 transition-colors p-1.5" title="Duplicate">
                 <Copy size={15}/>
               </button>
-              <button onClick={() => remove(s.id)} className="text-white/20 hover:text-red-400 transition-colors p-1.5" title="Delete">
+              <button onClick={() => remove(s.id, s.title)} className="text-white/20 hover:text-red-400 transition-colors p-1.5" title="Delete">
                 <Trash2 size={15}/>
               </button>
             </div>

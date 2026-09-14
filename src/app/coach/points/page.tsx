@@ -4,6 +4,8 @@ import { createClient } from '@/lib/supabase/client'
 import { toast } from 'react-hot-toast'
 import { Plus, Trash2, Star, Gift, Sparkles } from 'lucide-react'
 import { useScopedCategories } from '@/hooks/useScopedCategories'
+import { usePermissionGuard } from '@/hooks/usePermissionGuard'
+import { logAudit } from '@/lib/audit'
 
 function CategoryChips({ categories, selected, onToggle, includeAll = true }: { categories: string[]; selected: string[]; onToggle: (c: string) => void; includeAll?: boolean }) {
   const allCats = includeAll ? ['All', ...categories] : categories
@@ -22,6 +24,7 @@ function CategoryChips({ categories, selected, onToggle, includeAll = true }: { 
 
 export default function PointsPage() {
   const supabase = createClient()
+  const permitted = usePermissionGuard('points')
   const [rules, setRules] = useState<any[]>([])
   const [players, setPlayers] = useState<any[]>([])
   const [sessions, setSessions] = useState<any[]>([])
@@ -88,6 +91,7 @@ export default function PointsPage() {
     const { data: { user } } = await supabase.auth.getUser()
     const { error } = await supabase.from('point_rules').insert({ ...newRule, category: newRule.category.length ? newRule.category : ['All'], created_by: user?.id })
     if (error) { toast.error('Failed to add rule'); return }
+    logAudit(supabase, { action: 'create', entity: 'point_rule', summary: `Created point rule "${newRule.name}" (+${newRule.points})` })
     toast.success('Rule added!')
     setNewRule({ name: '', description: '', points: 1, icon: '⭐', category: ['All'] })
     setShowRuleForm(false)
@@ -96,7 +100,9 @@ export default function PointsPage() {
 
   async function deleteRule(id: string) {
     if (!confirm('Deactivate this rule?')) return
+    const rule = rules.find(r => r.id === id)
     await supabase.from('point_rules').update({ is_active: false }).eq('id', id)
+    logAudit(supabase, { action: 'delete', entity: 'point_rule', entity_id: id, summary: `Deactivated point rule "${rule?.name ?? id}"` })
     toast.success('Rule removed')
     loadAll()
   }
@@ -121,6 +127,7 @@ export default function PointsPage() {
 
     const { error } = await supabase.from('player_points').insert(records)
     if (error) { toast.error('Failed to award points'); setAwarding(false); return }
+    logAudit(supabase, { action: 'award', entity: 'player_points', summary: `Awarded "${rule.name}" (+${rule.points}) to ${playerIds.length} player(s)` })
     toast.success(`${rule.points} pts awarded to ${playerIds.length} player(s)!`)
     setAwardMap({})
     setAwarding(false)
@@ -140,6 +147,8 @@ export default function PointsPage() {
     })
     setAwardingCustom(false)
     if (error) { toast.error('Failed to award points'); return }
+    const player = players.find(p => p.id === customAward.player_id)
+    logAudit(supabase, { action: 'award', entity: 'player_points', summary: `One-off award of +${customAward.points} to ${player?.full_name ?? 'a player'}: ${customAward.reason.trim()}` })
     toast.success(`${customAward.points} pts awarded!`)
     setCustomAward({ player_id: '', points: 5, reason: '' })
   }
@@ -153,6 +162,7 @@ export default function PointsPage() {
       awarded_by: user?.id,
     })
     if (error) { toast.error('Failed'); return }
+    logAudit(supabase, { action: 'award', entity: 'global_award', summary: `Gave global award "${globalForm.title}" (+${globalForm.points}) to ${(globalForm.target_category.length ? globalForm.target_category : ['All']).join(', ')}` })
     toast.success('Global award given to all players!')
     setGlobalForm({ title: '', description: '', points: 2, target_category: ['All'] })
     setShowGlobalForm(false)
@@ -167,6 +177,12 @@ export default function PointsPage() {
     : players
 
   const rule = rules.find(r => r.id === selectedRule)
+
+  if (!permitted) return (
+    <div className="flex items-center justify-center min-h-screen text-white/30">
+      <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>
+    </div>
+  )
 
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto">

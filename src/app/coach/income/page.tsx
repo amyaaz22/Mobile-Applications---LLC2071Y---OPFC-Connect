@@ -8,13 +8,14 @@ import * as XLSX from 'xlsx'
 import { useConfigList } from '@/hooks/useConfigList'
 import { usePermissionGuard } from '@/hooks/usePermissionGuard'
 import ReceiptLink from '@/components/ReceiptLink'
+import { logAudit } from '@/lib/audit'
 
 const FALLBACK_SOURCES = ['Donation', 'Sponsorship', 'Fundraiser', 'Grant', 'Other']
 
 export default function IncomePage() {
   const supabase = createClient()
   const fileRef = useRef<HTMLInputElement>(null)
-  const permitted = usePermissionGuard('finance')
+  const permitted = usePermissionGuard('income')
   const SOURCES = useConfigList('income_sources', FALLBACK_SOURCES)
   const [income, setIncome] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -53,6 +54,7 @@ export default function IncomePage() {
     const { error } = await supabase.from('income').insert({ ...form, amount: +form.amount, receipt_url, created_by: user?.id })
     setSaving(false)
     if (error) { toast.error('Failed to save'); return }
+    logAudit(supabase, { action: 'create', entity: 'income', summary: `Recorded income of Rs ${form.amount} (${form.source})` })
     toast.success('Income recorded')
     setForm({ date: new Date().toISOString().split('T')[0], source: 'Donation', donor_name: '', amount: '', category: '', notes: '' })
     setReceiptFile(null)
@@ -62,7 +64,9 @@ export default function IncomePage() {
 
   async function deleteIncome(id: string) {
     if (!confirm('Delete this record?')) return
+    const rec = income.find(i => i.id === id)
     await supabase.from('income').delete().eq('id', id)
+    logAudit(supabase, { action: 'delete', entity: 'income', entity_id: id, summary: `Deleted income record (Rs ${rec?.amount ?? '?'}, ${rec?.source ?? ''})` })
     toast.success('Deleted')
     fetchIncome()
   }

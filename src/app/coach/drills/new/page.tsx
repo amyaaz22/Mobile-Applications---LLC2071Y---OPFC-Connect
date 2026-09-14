@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'react-hot-toast'
 import { ArrowLeft, Plus, X } from 'lucide-react'
 import Link from 'next/link'
+import { usePermissionGuard } from '@/hooks/usePermissionGuard'
+import { logAudit } from '@/lib/audit'
 
 function slugify(label: string, existing: string[]) {
   let base = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'col'
@@ -17,6 +19,7 @@ function slugify(label: string, existing: string[]) {
 export default function NewDrillSheetPage() {
   const supabase = createClient()
   const router = useRouter()
+  const permitted = usePermissionGuard('field_sheets')
   const [saving, setSaving] = useState(false)
   const [categories, setCategories] = useState<string[]>([])
   const [sessions, setSessions] = useState<any[]>([])
@@ -82,9 +85,16 @@ export default function NewDrillSheetPage() {
     }).select().single()
     setSaving(false)
     if (error || !data) { toast.error('Failed to create sheet'); return }
+    logAudit(supabase, { action: 'create', entity: 'field_sheet', entity_id: data.id, summary: `Created field sheet "${title.trim()}"` })
     toast.success('Sheet created!')
     router.push(`/coach/drills/${data.id}`)
   }
+
+  if (!permitted) return (
+    <div className="flex items-center justify-center min-h-screen text-white/30">
+      <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>
+    </div>
+  )
 
   return (
     <div className="p-4 md:p-8 max-w-2xl mx-auto">

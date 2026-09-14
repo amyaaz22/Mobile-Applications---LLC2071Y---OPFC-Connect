@@ -6,11 +6,14 @@ import { toast } from 'react-hot-toast'
 import { Plus, Trash2, Megaphone } from 'lucide-react'
 import { useConfigList } from '@/hooks/useConfigList'
 import { useScopedCategories } from '@/hooks/useScopedCategories'
+import { usePermissionGuard } from '@/hooks/usePermissionGuard'
+import { logAudit } from '@/lib/audit'
 
 const FALLBACK_TAGS = ['General', 'Admin', 'Event', 'Shop', 'Urgent']
 
 export default function AnnouncementsPage() {
   const supabase = createClient()
+  const permitted = usePermissionGuard('announcements')
   const [announcements, setAnnouncements] = useState<any[]>([])
   const [showForm, setShowForm] = useState(false)
   const [form, setForm] = useState({ title: '', body: '', tag: 'General', target_category: 'All', is_urgent: false })
@@ -41,6 +44,7 @@ export default function AnnouncementsPage() {
     const { data: { user } } = await supabase.auth.getUser()
     const { error } = await supabase.from('announcements').insert({ ...form, created_by: user?.id })
     if (error) { toast.error('Failed to post'); setSaving(false); return }
+    logAudit(supabase, { action: 'create', entity: 'announcement', summary: `Posted announcement "${form.title}"${form.is_urgent ? ' (urgent)' : ''}` })
     toast.success('Announcement posted!')
     setForm({ title: '', body: '', tag: 'General', target_category: 'All', is_urgent: false })
     setShowForm(false)
@@ -50,7 +54,9 @@ export default function AnnouncementsPage() {
 
   async function deleteAnn(id: string) {
     if (!confirm('Delete this announcement?')) return
+    const ann = announcements.find(a => a.id === id)
     await supabase.from('announcements').delete().eq('id', id)
+    logAudit(supabase, { action: 'delete', entity: 'announcement', entity_id: id, summary: `Deleted announcement "${ann?.title ?? id}"` })
     toast.success('Deleted')
     fetchAnnouncements()
   }
@@ -62,6 +68,12 @@ export default function AnnouncementsPage() {
     Urgent: 'bg-red-500/20 text-red-300 border-red-500/30',
     General: 'bg-white/10 text-white/60 border-white/10',
   }[tag] ?? 'bg-white/10 text-white/60')
+
+  if (!permitted) return (
+    <div className="flex items-center justify-center min-h-screen text-white/30">
+      <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>
+    </div>
+  )
 
   return (
     <div className="p-4 md:p-8 max-w-3xl mx-auto">
