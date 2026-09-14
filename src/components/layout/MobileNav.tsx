@@ -7,9 +7,9 @@ import { Home, Users, CalendarDays, BarChart3, QrCode, CreditCard, PiggyBank, Tr
 
 const coachItems: { href: string; label: string; icon: typeof Home; area?: PermissionArea }[] = [
   { href: '/coach', label: 'Home', icon: Home },
-  { href: '/coach/players', label: 'Players', icon: Users },
+  { href: '/coach/players', label: 'Players', icon: Users, area: 'players' },
   { href: '/scan', label: 'Scan', icon: QrCode },
-  { href: '/coach/analytics', label: 'Analytics', icon: TrendingUp },
+  { href: '/coach/analytics', label: 'Analytics', icon: TrendingUp, area: 'analytics' },
   { href: '/coach/finance', label: 'Finance', icon: PiggyBank, area: 'finance' },
 ]
 
@@ -33,7 +33,7 @@ export default function MobileNav({ role, permissions }: { role: string; permiss
   const items = (role === 'coach' || role === 'admin' ? coachItems
     : role === 'parent' ? parentItems
     : playerItems
-  ).filter(item => !item.area || role !== 'admin' || hasPermission(profile, item.area))
+  ).filter(item => !item.area || hasPermission(profile, item.area))
 
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#091520]/95 backdrop-blur-lg border-t border-white/5">

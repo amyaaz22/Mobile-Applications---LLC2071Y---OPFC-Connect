@@ -8,13 +8,14 @@ import * as XLSX from 'xlsx'
 import { useConfigList } from '@/hooks/useConfigList'
 import { usePermissionGuard } from '@/hooks/usePermissionGuard'
 import ReceiptLink from '@/components/ReceiptLink'
+import { logAudit } from '@/lib/audit'
 
 const FALLBACK_CATEGORIES = ['Equipment', 'Referee Fees', 'Transport', 'Medical', 'Venue / Pitch Hire', 'Administration', 'Other']
 
 export default function ExpensesPage() {
   const supabase = createClient()
   const fileRef = useRef<HTMLInputElement>(null)
-  const permitted = usePermissionGuard('finance')
+  const permitted = usePermissionGuard('expenses')
   const CATEGORIES = useConfigList('expense_categories', FALLBACK_CATEGORIES)
   const [expenses, setExpenses] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -53,6 +54,7 @@ export default function ExpensesPage() {
     const { error } = await supabase.from('expenses').insert({ ...form, amount: +form.amount, receipt_url, created_by: user?.id })
     setSaving(false)
     if (error) { toast.error('Failed to save'); return }
+    logAudit(supabase, { action: 'create', entity: 'expense', summary: `Recorded expense "${form.description}" (Rs ${form.amount}, ${form.category})` })
     toast.success('Expense recorded')
     setForm({ date: new Date().toISOString().split('T')[0], category: 'Equipment', description: '', amount: '', paid_by: '', notes: '' })
     setReceiptFile(null)
@@ -62,7 +64,9 @@ export default function ExpensesPage() {
 
   async function deleteExpense(id: string) {
     if (!confirm('Delete this expense?')) return
+    const exp = expenses.find(e => e.id === id)
     await supabase.from('expenses').delete().eq('id', id)
+    logAudit(supabase, { action: 'delete', entity: 'expense', entity_id: id, summary: `Deleted expense "${exp?.description ?? id}" (Rs ${exp?.amount ?? '?'})` })
     toast.success('Deleted')
     fetchExpenses()
   }

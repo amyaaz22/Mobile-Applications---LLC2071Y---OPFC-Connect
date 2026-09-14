@@ -5,6 +5,7 @@ import { toast } from 'react-hot-toast'
 import { Download, Upload, CheckCircle, XCircle, ArrowLeft, FileSpreadsheet } from 'lucide-react'
 import Link from 'next/link'
 import * as XLSX from 'xlsx'
+import { usePermissionGuard } from '@/hooks/usePermissionGuard'
 
 const FALLBACK_CATEGORIES = ['U9', 'U13', 'First Team']
 const FALLBACK_POSITIONS = ['GK', 'DEF', 'MID', 'FWD']
@@ -178,6 +179,7 @@ function validateRow(row: any, i: number, categories: string[], positions: strin
 
 export default function ImportPlayersPage() {
   const supabase = createClient()
+  const permitted = usePermissionGuard('players')
   const fileRef = useRef<HTMLInputElement>(null)
   const [rows, setRows] = useState<ImportRow[]>([])
   const [importing, setImporting] = useState(false)
@@ -290,6 +292,12 @@ export default function ImportPlayersPage() {
 
   const validRows = rows.filter(r => r.status !== 'error')
   const errorRows = rows.filter(r => r.status === 'error')
+
+  if (!permitted) return (
+    <div className="flex items-center justify-center min-h-screen text-white/30">
+      <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>
+    </div>
+  )
 
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto">

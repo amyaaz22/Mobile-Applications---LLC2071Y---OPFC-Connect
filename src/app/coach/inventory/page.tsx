@@ -6,6 +6,7 @@ import { Plus, Trash2, Edit3, Download, Upload, Package, AlertTriangle, X } from
 import * as XLSX from 'xlsx'
 import { useConfigList } from '@/hooks/useConfigList'
 import { usePermissionGuard } from '@/hooks/usePermissionGuard'
+import { logAudit } from '@/lib/audit'
 
 const FALLBACK_CATEGORIES = ['Jerseys', 'Balls', 'Training Equipment', 'Goals & Nets', 'Medical Kit', 'Bibs & Cones', 'Other']
 const FALLBACK_CONDITIONS = ['New', 'Good', 'Worn', 'Damaged']
@@ -79,6 +80,7 @@ export default function InventoryPage() {
       : await supabase.from('inventory_items').insert(payload)
     setSaving(false)
     if (error) { toast.error('Failed to save'); return }
+    logAudit(supabase, { action: editingId ? 'update' : 'create', entity: 'inventory_item', entity_id: editingId ?? undefined, summary: `${editingId ? 'Updated' : 'Added'} inventory item "${form.name.trim()}" (qty ${payload.quantity})` })
     toast.success(editingId ? 'Item updated' : 'Item added')
     setShowForm(false)
     fetchAll()
@@ -86,7 +88,9 @@ export default function InventoryPage() {
 
   async function deleteItem(id: string) {
     if (!confirm('Delete this item?')) return
+    const item = items.find(i => i.id === id)
     await supabase.from('inventory_items').delete().eq('id', id)
+    logAudit(supabase, { action: 'delete', entity: 'inventory_item', entity_id: id, summary: `Deleted inventory item "${item?.name ?? id}"` })
     toast.success('Deleted')
     fetchAll()
   }

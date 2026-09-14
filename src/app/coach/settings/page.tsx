@@ -5,6 +5,7 @@ import { toast } from 'react-hot-toast'
 import { Save, Upload, ChevronDown } from 'lucide-react'
 import ListEditor from '@/components/ListEditor'
 import { usePermissionGuard } from '@/hooks/usePermissionGuard'
+import { logAudit } from '@/lib/audit'
 
 const DEFAULT_LISTS: Record<string, string[]> = {
   positions: ['GK', 'DEF', 'MID', 'FWD'],
@@ -141,6 +142,7 @@ export default function ClubSettingsPage() {
     const results = await Promise.all(updates)
     const errors = results.filter(r => r.error)
     if (errors.length) { toast.error('Some settings failed to save'); setSaving(false); return }
+    logAudit(supabase, { action: 'update', entity: 'settings', summary: 'Updated Club Settings (categories/fees/club info/dropdown lists)' })
     toast.success('Settings saved!')
     setSaving(false)
   }

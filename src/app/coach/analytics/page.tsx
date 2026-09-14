@@ -8,6 +8,7 @@ import {
 } from 'recharts'
 import { Users, TrendingUp, Wallet, CalendarDays, Award, Activity } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
+import { usePermissionGuard } from '@/hooks/usePermissionGuard'
 
 // ── Custom tooltip ────────────────────────────────────────────
 const ChartTooltip = ({ active, payload, label }: any) => {
@@ -46,6 +47,7 @@ const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
 
 export default function AnalyticsDashboard() {
   const supabase = createClient()
+  const permitted = usePermissionGuard('analytics')
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<any>(null)
 
@@ -244,7 +246,7 @@ export default function AnalyticsDashboard() {
     setLoading(false)
   }
 
-  if (loading) return (
+  if (loading || !permitted) return (
     <div className="min-h-screen flex items-center justify-center" style={{ background: '#0D1B2A' }}>
       <div className="flex items-center gap-3" style={{ color: 'rgba(255,255,255,0.4)' }}>
         <div style={{ width: 24, height: 24, border: '2px solid rgba(78,198,198,0.3)', borderTop: '2px solid #4EC6C6', borderRadius: '50%', animation: 'spin 1s linear infinite' }}/>

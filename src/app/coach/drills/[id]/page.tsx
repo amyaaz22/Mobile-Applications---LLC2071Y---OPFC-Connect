@@ -6,6 +6,7 @@ import { toast } from 'react-hot-toast'
 import { ArrowLeft, Plus, X, Download, Printer, UserPlus, Check } from 'lucide-react'
 import Link from 'next/link'
 import * as XLSX from 'xlsx'
+import { usePermissionGuard } from '@/hooks/usePermissionGuard'
 
 function slugify(label: string, existing: string[]) {
   let base = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'col'
@@ -19,6 +20,7 @@ export default function DrillSheetPage() {
   const params = useParams()
   const router = useRouter()
   const supabase = createClient()
+  const permitted = usePermissionGuard('field_sheets')
   const [sheet, setSheet] = useState<any>(null)
   const [players, setPlayers] = useState<any[]>([])
   const [allPlayers, setAllPlayers] = useState<any[]>([])
@@ -177,7 +179,7 @@ export default function DrillSheetPage() {
     toast.success('PDF ready — print it for pitch-side use')
   }
 
-  if (!sheet) return (
+  if (!permitted || !sheet) return (
     <div className="flex items-center justify-center min-h-screen text-white/30">
       <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>
     </div>

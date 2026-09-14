@@ -6,6 +6,8 @@ import { toast } from 'react-hot-toast'
 import { ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
 import { useConfigList } from '@/hooks/useConfigList'
+import { usePermissionGuard } from '@/hooks/usePermissionGuard'
+import { logAudit } from '@/lib/audit'
 
 const FALLBACK_CATEGORIES = ['U9', 'U13', 'First Team']
 const FALLBACK_POSITIONS = ['GK', 'DEF', 'MID', 'FWD']
@@ -14,6 +16,7 @@ const FALLBACK_RELATIONSHIPS = ['Father', 'Mother', 'Uncle', 'Aunt', 'Sibling', 
 export default function NewPlayerPage() {
   const supabase = createClient()
   const router = useRouter()
+  const permitted = usePermissionGuard('players')
   const [saving, setSaving] = useState(false)
   const [step, setStep] = useState(1)
   const [categories, setCategories] = useState<string[]>(FALLBACK_CATEGORIES)
@@ -56,9 +59,16 @@ export default function NewPlayerPage() {
       await supabase.from('payments').insert({ player_id: newPlayer.id, type: 'entry', amount: entryFee, status: 'pending' })
     }
 
+    logAudit(supabase, { action: 'create', entity: 'player', entity_id: newPlayer.id, summary: `Registered player "${player.full_name}" (${player.category})` })
     toast.success(`${player.full_name} registered!`)
     router.push(`/coach/players/${newPlayer.id}`)
   }
+
+  if (!permitted) return (
+    <div className="flex items-center justify-center min-h-screen text-white/30">
+      <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>
+    </div>
+  )
 
   return (
     <div className="p-4 md:p-8 max-w-2xl mx-auto">

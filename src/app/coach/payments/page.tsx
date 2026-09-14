@@ -6,6 +6,8 @@ import { toast } from 'react-hot-toast'
 import { CheckCircle, Clock, Plus, X, Download, Wallet, Receipt } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { useConfigList } from '@/hooks/useConfigList'
+import { usePermissionGuard } from '@/hooks/usePermissionGuard'
+import { logAudit } from '@/lib/audit'
 
 const FALLBACK_METHODS = ['Cash', 'Bank Transfer', 'Mobile Money', 'Other']
 
@@ -48,6 +50,7 @@ function RecordPaymentModal({ players, entryFee, feeFor, methods, onClose, onSav
     })
     setSaving(false)
     if (error) { toast.error('Failed to record payment: ' + error.message); return }
+    logAudit(supabase, { action: 'create', entity: 'payment', summary: `Recorded ${form.type} payment of Rs ${form.amount} (${form.status})` })
     toast.success('Payment recorded!')
     onSaved()
   }
@@ -136,6 +139,7 @@ function RecordPaymentModal({ players, entryFee, feeFor, methods, onClose, onSav
 
 export default function PaymentsPage() {
   const supabase = createClient()
+  const permitted = usePermissionGuard('payments')
   const [players, setPlayers] = useState<any[]>([])
   const [payments, setPayments] = useState<any[]>([])
   const [entryPayments, setEntryPayments] = useState<any[]>([])
@@ -207,6 +211,8 @@ export default function PaymentsPage() {
         status: 'paid', confirmed_by: user?.id, confirmed_at: new Date().toISOString(),
       })
     }
+    const player = players.find(p => p.id === playerId)
+    logAudit(supabase, { action: 'update', entity: 'payment', summary: `Marked ${type} fee as paid for ${player?.full_name ?? playerId}` })
     toast.success('Marked as paid')
     fetchData(); fetchLedger()
   }
@@ -250,6 +256,12 @@ export default function PaymentsPage() {
   const pending = players.length - paid
   const entriesOutstanding = players.filter(p => getEntryPayment(p.id)?.status !== 'paid').length
   const totalCollected = allPayments.filter(p => p.status === 'paid').reduce((s, p) => s + p.amount, 0)
+
+  if (!permitted) return (
+    <div className="flex items-center justify-center min-h-screen text-white/30">
+      <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>
+    </div>
+  )
 
   return (
     <div className="p-4 md:p-8 max-w-5xl mx-auto">

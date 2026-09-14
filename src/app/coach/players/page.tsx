@@ -11,11 +11,13 @@ import { toast } from 'react-hot-toast'
 import * as XLSX from 'xlsx'
 import QRCode from 'qrcode'
 import { useScopedCategories } from '@/hooks/useScopedCategories'
+import { usePermissionGuard } from '@/hooks/usePermissionGuard'
 
 const FALLBACK_CATEGORIES = ['U9', 'U13', 'First Team']
 
 export default function PlayersPage() {
   const supabase = createClient()
+  const permitted = usePermissionGuard('players')
   const [players, setPlayers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -152,6 +154,12 @@ export default function PlayersPage() {
     }
     fetchPlayers()
   }, [search, category, scopedCategories])
+
+  if (!permitted) return (
+    <div className="flex items-center justify-center min-h-screen text-white/30">
+      <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>
+    </div>
+  )
 
   return (
     <div className="p-4 md:p-8 max-w-6xl mx-auto">

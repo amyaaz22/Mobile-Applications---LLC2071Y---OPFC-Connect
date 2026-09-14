@@ -6,10 +6,13 @@ import { toast } from 'react-hot-toast'
 import { ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
 import { useScopedCategories } from '@/hooks/useScopedCategories'
+import { usePermissionGuard } from '@/hooks/usePermissionGuard'
+import { logAudit } from '@/lib/audit'
 
 export default function NewSessionPage() {
   const supabase = createClient()
   const router = useRouter()
+  const permitted = usePermissionGuard('sessions')
   const [saving, setSaving] = useState(false)
   const [categories, setCategories] = useState<string[]>(['U9', 'U13', 'First Team'])
   const { scopedCategories, visibleCategories } = useScopedCategories(categories)
@@ -41,11 +44,18 @@ export default function NewSessionPage() {
     e.preventDefault()
     setSaving(true)
     const { data: { user } } = await supabase.auth.getUser()
-    const { error } = await supabase.from('training_sessions').insert({ ...form, created_by: user?.id })
+    const { data: newSession, error } = await supabase.from('training_sessions').insert({ ...form, created_by: user?.id }).select().single()
     if (error) { toast.error('Failed to create session'); setSaving(false); return }
+    logAudit(supabase, { action: 'create', entity: 'session', entity_id: newSession?.id, summary: `Created session "${form.title}" (${form.category})` })
     toast.success('Session created!')
     router.push('/coach/sessions')
   }
+
+  if (!permitted) return (
+    <div className="flex items-center justify-center min-h-screen text-white/30">
+      <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>
+    </div>
+  )
 
   return (
     <div className="p-4 md:p-8 max-w-2xl mx-auto">

@@ -9,23 +9,23 @@ import {
   Users, CreditCard, CalendarDays, BarChart3, Megaphone,
   Wallet, LogOut, QrCode, Home, ChevronRight, UserCircle,
   Settings, TrendingUp, Trophy, Star, PiggyBank, Receipt,
-  HeartHandshake, Package, ShieldCheck, ClipboardList
+  HeartHandshake, Package, ShieldCheck, ClipboardList, Activity
 } from 'lucide-react'
 
 const coachNav: { href: string; label: string; icon: JSX.Element; area?: PermissionArea }[] = [
   { href: '/coach', label: 'Dashboard', icon: <Home size={18}/> },
-  { href: '/coach/players', label: 'Players', icon: <Users size={18}/> },
-  { href: '/coach/sessions', label: 'Sessions', icon: <CalendarDays size={18}/> },
-  { href: '/coach/drills', label: 'Field Sheets', icon: <ClipboardList size={18}/> },
-  { href: '/coach/attendance', label: 'Attendance', icon: <BarChart3 size={18}/> },
-  { href: '/coach/analytics', label: 'Analytics', icon: <TrendingUp size={18}/> },
-  { href: '/coach/leaderboard', label: 'Leaderboard', icon: <Trophy size={18}/> },
-  { href: '/coach/points', label: 'Points', icon: <Star size={18}/> },
-  { href: '/coach/announcements', label: 'Announcements', icon: <Megaphone size={18}/> },
+  { href: '/coach/players', label: 'Players', icon: <Users size={18}/>, area: 'players' },
+  { href: '/coach/sessions', label: 'Sessions', icon: <CalendarDays size={18}/>, area: 'sessions' },
+  { href: '/coach/drills', label: 'Field Sheets', icon: <ClipboardList size={18}/>, area: 'field_sheets' },
+  { href: '/coach/attendance', label: 'Attendance', icon: <BarChart3 size={18}/>, area: 'attendance' },
+  { href: '/coach/analytics', label: 'Analytics', icon: <TrendingUp size={18}/>, area: 'analytics' },
+  { href: '/coach/leaderboard', label: 'Leaderboard', icon: <Trophy size={18}/>, area: 'leaderboard' },
+  { href: '/coach/points', label: 'Points', icon: <Star size={18}/>, area: 'points' },
+  { href: '/coach/announcements', label: 'Announcements', icon: <Megaphone size={18}/>, area: 'announcements' },
   { href: '/coach/finance', label: 'Finance', icon: <PiggyBank size={18}/>, area: 'finance' },
-  { href: '/coach/payments', label: 'Payments', icon: <Wallet size={18}/>, area: 'finance' },
-  { href: '/coach/income', label: 'Income & Donations', icon: <HeartHandshake size={18}/>, area: 'finance' },
-  { href: '/coach/expenses', label: 'Expenses', icon: <Receipt size={18}/>, area: 'finance' },
+  { href: '/coach/payments', label: 'Payments', icon: <Wallet size={18}/>, area: 'payments' },
+  { href: '/coach/income', label: 'Income & Donations', icon: <HeartHandshake size={18}/>, area: 'income' },
+  { href: '/coach/expenses', label: 'Expenses', icon: <Receipt size={18}/>, area: 'expenses' },
   { href: '/coach/inventory', label: 'Inventory', icon: <Package size={18}/>, area: 'inventory' },
   { href: '/scan', label: 'QR Scanner', icon: <QrCode size={18}/> },
   { href: '/coach/settings', label: 'Club Settings', icon: <Settings size={18}/>, area: 'settings' },
@@ -34,6 +34,7 @@ const coachNav: { href: string; label: string; icon: JSX.Element; area?: Permiss
 
 const adminOnlyNav: { href: string; label: string; icon: JSX.Element; area?: PermissionArea }[] = [
   { href: '/coach/staff', label: 'Staff & Parents', icon: <ShieldCheck size={18}/>, area: 'staff' },
+  { href: '/coach/admin', label: 'Super Admin', icon: <Activity size={18}/>, area: 'system' },
 ]
 
 const parentNav: { href: string; label: string; icon: JSX.Element; area?: PermissionArea }[] = [
@@ -59,7 +60,7 @@ export default function Sidebar({ role, userName, permissions }: { role: string;
   const nav = (role === 'coach' || role === 'admin'
     ? [...coachNav, ...(role === 'admin' ? adminOnlyNav : [])]
     : role === 'parent' ? parentNav : playerNav
-  ).filter(item => !item.area || role !== 'admin' || hasPermission(profile, item.area))
+  ).filter(item => !item.area || hasPermission(profile, item.area))
   const [clubInfo, setClubInfo] = useState<{ logo_url?: string; name?: string }>({})
 
   useEffect(() => {

@@ -9,8 +9,12 @@ import {
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { PERMISSION_AREAS, hasPermission } from '@/lib/permissions'
+import { logAudit } from '@/lib/audit'
+
+const COACH_PERMISSION_AREAS = PERMISSION_AREAS.filter(a => a.key !== 'staff' && a.key !== 'system')
 
 function InviteModal({ role, onClose, onSent }: { role: 'coach' | 'parent'; onClose: () => void; onSent: () => void }) {
+  const supabase = createClient()
   const [form, setForm] = useState({ email: '', full_name: '' })
   const [sending, setSending] = useState(false)
 
@@ -25,6 +29,7 @@ function InviteModal({ role, onClose, onSent }: { role: 'coach' | 'parent'; onCl
     const data = await res.json()
     setSending(false)
     if (!res.ok) { toast.error(data.error ?? 'Invite failed'); return }
+    logAudit(supabase, { action: 'invite', entity: 'staff', summary: `Invited ${form.full_name.trim()} (${form.email.trim()}) as ${role}` })
     toast.success(`Invite sent to ${form.email}`)
     onSent()
   }
@@ -122,8 +127,10 @@ export default function StaffPage() {
   }
 
   async function promote(id: string, role: 'coach' | 'admin' = 'coach') {
+    const person = promoteResults.find(p => p.id === id) ?? coaches.find(c => c.id === id)
     const { error } = await supabase.from('profiles').update({ role }).eq('id', id)
     if (error) { toast.error('Failed to promote: ' + error.message); return }
+    logAudit(supabase, { action: 'promote', entity: 'staff', entity_id: id, summary: `Promoted ${person?.full_name ?? id} to ${role}` })
     toast.success(role === 'admin' ? 'Promoted to admin' : 'Promoted to coach')
     setPromoteResults(r => r.filter(p => p.id !== id))
     loadAll()
@@ -133,6 +140,7 @@ export default function StaffPage() {
     if (!confirm(`Remove coach access for ${name}? They'll become a regular parent account.`)) return
     const { error } = await supabase.from('profiles').update({ role: 'parent', assigned_categories: null }).eq('id', id)
     if (error) { toast.error('Failed: ' + error.message); return }
+    logAudit(supabase, { action: 'demote', entity: 'staff', entity_id: id, summary: `Removed coach access for ${name}` })
     toast.success('Coach access removed')
     loadAll()
   }
@@ -141,6 +149,7 @@ export default function StaffPage() {
     if (!confirm(`Remove admin access for ${name}? They'll become a coach instead.`)) return
     const { error } = await supabase.from('profiles').update({ role: 'coach', permissions: null }).eq('id', id)
     if (error) { toast.error('Failed: ' + error.message); return }
+    logAudit(supabase, { action: 'demote', entity: 'staff', entity_id: id, summary: `Removed admin access for ${name}` })
     toast.success('Admin access removed')
     loadAll()
   }
@@ -155,10 +164,12 @@ export default function StaffPage() {
 
   async function togglePermission(profileId: string, current: string[] | null, area: string) {
     if (profileId === viewerId) { toast.error('You can\'t narrow your own access — ask another unrestricted admin'); return }
+    const person = coaches.find(c => c.id === profileId)
     const list = current ?? []
     const next = list.includes(area) ? list.filter(a => a !== area) : [...list, area]
     const { error } = await supabase.from('profiles').update({ permissions: next.length ? next : null }).eq('id', profileId)
     if (error) { toast.error('Failed to update — only an unrestricted admin can change this'); return }
+    logAudit(supabase, { action: 'update', entity: 'staff', entity_id: profileId, summary: `Changed ${person?.full_name ?? profileId}'s access: ${next.length ? next.join(', ') : 'unrestricted'}` })
     loadAll()
   }
 
@@ -201,6 +212,7 @@ export default function StaffPage() {
         if (res.ok) sent++; else failed++
         await new Promise(r => setTimeout(r, 150))
       }
+      if (sent > 0) logAudit(supabase, { action: 'invite', entity: 'staff', summary: `Bulk-invited ${sent} coach(es) from import${failed ? ` (${failed} failed)` : ''}` })
       toast.success(`${sent} invited${failed ? `, ${failed} failed (likely already registered)` : ''}`)
       if (coachFileRef.current) coachFileRef.current.value = ''
       loadAll()
@@ -383,7 +395,7 @@ export default function StaffPage() {
                     </div>
                   </div>
                   {c.role === 'coach' && categories.length > 0 && (
-                    <div className="pl-12">
+                    <div className="pl-12 mb-3">
                       <p className="text-white/25 text-xs mb-1.5">Scoped to (UI filter, not a security boundary) — empty means unrestricted:</p>
                       <div className="flex gap-1.5 flex-wrap">
                         {categories.map(cat => (
@@ -391,6 +403,25 @@ export default function StaffPage() {
                             className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all
                               ${(c.assigned_categories ?? []).includes(cat) ? 'bg-teal-400/10 border-teal-400/30 text-teal-400' : 'border-white/10 text-white/40 hover:text-white'}`}>
                             {cat}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {c.role === 'coach' && (
+                    <div className="pl-12">
+                      <p className="text-white/25 text-xs mb-1.5">
+                        {(c.permissions?.length ?? 0) === 0 ? 'Full access to every area.' : 'Access limited to:'}
+                        {!viewerIsFullAdmin && ' Only an unrestricted admin can change this.'}
+                      </p>
+                      <div className="flex gap-1.5 flex-wrap">
+                        {COACH_PERMISSION_AREAS.map(({ key, label }) => (
+                          <button key={key} disabled={!viewerIsFullAdmin}
+                            onClick={() => togglePermission(c.id, c.permissions, key)}
+                            className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all disabled:opacity-40 disabled:cursor-not-allowed
+                              ${(c.permissions ?? []).includes(key) ? 'bg-purple-400/10 border-purple-400/30 text-purple-300' : 'border-white/10 text-white/40 hover:text-white'}`}
+                            title={label}>
+                            {label}
                           </button>
                         ))}
                       </div>

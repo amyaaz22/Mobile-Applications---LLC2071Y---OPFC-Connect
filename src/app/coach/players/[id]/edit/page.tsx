@@ -6,11 +6,14 @@ import { toast } from 'react-hot-toast'
 import { ArrowLeft, Upload, X } from 'lucide-react'
 import Link from 'next/link'
 import { useConfigList } from '@/hooks/useConfigList'
+import { usePermissionGuard } from '@/hooks/usePermissionGuard'
+import { logAudit } from '@/lib/audit'
 
 export default function EditPlayerPage() {
   const params = useParams()
   const router = useRouter()
   const supabase = createClient()
+  const permitted = usePermissionGuard('players')
   const fileRef = useRef<HTMLInputElement>(null)
 
   const [player, setPlayer] = useState<any>(null)
@@ -81,6 +84,7 @@ export default function EditPlayerPage() {
     }).eq('id', params.id as string)
 
     if (pe) { toast.error('Failed to save player: ' + pe.message); setSaving(false); return }
+    logAudit(supabase, { action: 'update', entity: 'player', entity_id: params.id as string, summary: `Updated player "${player.full_name}"` })
 
     if (guardian) {
       // guardian may come as array from supabase join
@@ -128,11 +132,12 @@ export default function EditPlayerPage() {
   async function toggleActive() {
     const newStatus = !player.is_active
     await supabase.from('players').update({ is_active: newStatus }).eq('id', params.id as string)
+    logAudit(supabase, { action: newStatus ? 'update' : 'delete', entity: 'player', entity_id: params.id as string, summary: `${newStatus ? 'Reactivated' : 'Deactivated'} player "${player.full_name}"` })
     toast.success(newStatus ? 'Player reactivated' : 'Player deactivated')
     router.push('/coach/players')
   }
 
-  if (!player) return (
+  if (!permitted || !player) return (
     <div className="flex items-center justify-center min-h-screen text-white/30">
       <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>
     </div>

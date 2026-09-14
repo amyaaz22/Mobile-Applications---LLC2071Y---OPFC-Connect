@@ -6,11 +6,14 @@ import { formatDate, formatTime, categoryColor } from '@/lib/utils'
 import { ArrowLeft, QrCode, CheckCircle, XCircle, Clock, Users, Trash2, Link2, Copy } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'react-hot-toast'
+import { usePermissionGuard } from '@/hooks/usePermissionGuard'
+import { logAudit } from '@/lib/audit'
 
 export default function SessionDetailPage() {
   const params = useParams()
   const router = useRouter()
   const supabase = createClient()
+  const permitted = usePermissionGuard('sessions')
   const [session, setSession] = useState<any>(null)
   const [attendance, setAttendance] = useState<any[]>([])
   const [allPlayers, setAllPlayers] = useState<any[]>([])
@@ -80,11 +83,12 @@ export default function SessionDetailPage() {
   async function deleteSession() {
     if (!confirm('Delete this session and all its attendance records?')) return
     await supabase.from('training_sessions').delete().eq('id', params.id as string)
+    logAudit(supabase, { action: 'delete', entity: 'session', entity_id: params.id as string, summary: `Deleted session "${session.title}"` })
     toast.success('Session deleted')
     router.push('/coach/sessions')
   }
 
-  if (loading || !session) return (
+  if (!permitted || loading || !session) return (
     <div className="flex items-center justify-center min-h-screen text-white/30">
       <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>
     </div>
