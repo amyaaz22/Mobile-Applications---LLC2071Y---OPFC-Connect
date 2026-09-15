@@ -20,7 +20,7 @@ Built for the club's daily operations AND as a Year 3 BSc dissertation project.
 - Push to GitHub main → Vercel auto-deploys (takes ~1 min)
 - Always run `npm run build` locally before pushing to catch errors
 - Environment variables are set in Vercel dashboard (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY)
-- **Before this deploys correctly, run `schema_v3_additions.sql` through `schema_v7_additions.sql` in the Supabase SQL Editor**, in order (all additive — safe on the live DB, and all already applied on the live project as of this writing). v3 adds expenses/income/inventory tables, fixes a profile role-escalation hole, widens payments.type, converts point_rules/global_awards category columns to arrays. v4 frees players.position / announcements.tag / inventory_items.condition from their old CHECK constraints (Club Settings → Dropdown Lists now owns those lists), seeds the new dropdown-list keys, and adds profiles.permissions for granular admin access. v5 adds the field_sheets table (Field Sheets feature). v6 adds payments.reference (optional transaction ref), income.receipt_url, a private `receipts` storage bucket for expense/income attachments, and seeds categories/fees/club_info if missing. v7 adds the `audit_log` table (Super Admin panel's Activity Log).
+- **Before this deploys correctly, run `schema_v3_additions.sql` through `schema_v8_additions.sql` in the Supabase SQL Editor**, in order (all additive — safe on the live DB, and all already applied on the live project as of this writing). v3 adds expenses/income/inventory tables, fixes a profile role-escalation hole, widens payments.type, converts point_rules/global_awards category columns to arrays. v4 frees players.position / announcements.tag / inventory_items.condition from their old CHECK constraints (Club Settings → Dropdown Lists now owns those lists), seeds the new dropdown-list keys, and adds profiles.permissions for granular admin access. v5 adds the field_sheets table (Field Sheets feature). v6 adds payments.reference (optional transaction ref), income.receipt_url, a private `receipts` storage bucket for expense/income attachments, and seeds categories/fees/club_info if missing. v7 adds the `audit_log` table (Super Admin panel's Activity Log). v8 adds income.donor_profile_id (optional link from a donation to the parent who made it, for the Statement of Account).
 - Coach/parent invites (Staff & Parents page) send real emails via Supabase Auth — needs an email provider configured in the Supabase project (default Supabase SMTP is rate-limited; for real usage swap in a custom SMTP provider under Auth settings)
 
 ---
@@ -111,6 +111,7 @@ src/
       schedule/             — Training schedule
       attendance/           — Attendance history + chart
       leaderboard/          — Club leaderboard (own player highlighted)
+      statement/            — Statement of Account: outstanding balance, all payments (entry/monthly/other) for their child, their own linked donations, Excel export
     player/
       page.tsx              — Player dashboard (incl. points total)
       card/                 — Player card view
@@ -169,6 +170,7 @@ supabase/
   schema_v5_additions.sql   — Additive migration: field_sheets table (run AFTER v4)
   schema_v6_additions.sql   — Additive migration: payments.reference, income.receipt_url, private `receipts` storage bucket, seeds categories/fees/club_info if missing (run AFTER v5)
   schema_v7_additions.sql   — Additive migration: audit_log table (append-only, admin-only read) for the Super Admin panel's Activity Log (run AFTER v6)
+  schema_v8_additions.sql   — Additive migration: income.donor_profile_id, optional link from a donation to the parent's account (run AFTER v7)
 ```
 
 ---
@@ -184,7 +186,7 @@ supabase/
 | `attendance` | QR scan records |
 | `payments` | `type` in `entry` / `monthly` / `other`; has `method` column and an optional `reference` (bank transfer ref / Juice transaction ID / etc, freeform, never required). Entry-fee row auto-created (status `pending`) on player registration and import |
 | `expenses` | Club spending: referee fees, transport, equipment, etc. `receipt_url` (optional) is an object path in the private `receipts` storage bucket, not a public URL — view via `ReceiptLink` (signed URL) |
-| `income` | Donations, sponsorships, fundraising — anything that isn't a player fee. Same optional `receipt_url` convention as `expenses` |
+| `income` | Donations, sponsorships, fundraising — anything that isn't a player fee. Same optional `receipt_url` convention as `expenses`. `donor_profile_id` (v8, optional) links a donation to the parent's account so it shows on their Statement of Account — set via a select in the Record Income form when a parent profile exists |
 | `inventory_items` | Kit/equipment: quantity, condition, `min_stock` drives the low-stock flag, optional `assigned_to` player |
 | `announcements` | Club-wide messages |
 | `club_settings` | Dynamic config: categories (plain string array, e.g. `["U9","U13"]` — never `{name: ...}` objects), fees, club_info (logo_url) |
@@ -198,7 +200,14 @@ supabase/
 ---
 
 ## Current Known Issues / TODO
-Also done since the last update: granular `permissions` now covers 16
+Also done since the last update: parents now have a **Statement of Account**
+(`/parent/statement`) — outstanding balance, total paid, total contributed,
+and a chronological transaction list covering entry fee, monthly fees, and
+any "other" payments for their linked player, plus their own donations
+(when a coach links a donation to their account via the new optional
+`donor_profile_id` on `income`, set from a dropdown in the Record Income
+form). Excel export included; linked from the parent dashboard's Fee Status
+card and the parent Sidebar. Granular `permissions` now covers 16
 areas (one per page/module) instead of the original 4, and — the big
 change — applies to **`coach` accounts too**, not just admin-narrowing;
 every previously-ungated coach page now sits behind `usePermissionGuard`;

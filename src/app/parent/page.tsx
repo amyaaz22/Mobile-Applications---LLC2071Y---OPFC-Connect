@@ -94,7 +94,7 @@ export default function ParentDashboard() {
                 <div className="text-white/40 text-xs mt-1">Points</div>
                 <div className="text-white/20 text-xs">View leaderboard</div>
               </Link>
-              <div className="card p-4 text-center">
+              <Link href="/parent/statement" className="card card-hover p-4 text-center">
                 <div className={`text-3xl font-black font-condensed ${payment?.status === 'paid' ? 'text-green-400' : 'text-amber-400'}`}>
                   {payment?.status === 'paid' ? '✓' : '!'}
                 </div>
@@ -102,7 +102,7 @@ export default function ParentDashboard() {
                 <div className={`badge mt-1 mx-auto inline-block ${paymentStatusColor(payment?.status ?? 'pending')}`}>
                   {payment?.status ?? 'pending'}
                 </div>
-              </div>
+              </Link>
             </div>
           )}
 
