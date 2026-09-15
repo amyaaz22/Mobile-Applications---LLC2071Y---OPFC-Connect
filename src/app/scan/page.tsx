@@ -7,6 +7,14 @@ import { CalendarDays, CheckCircle, Wifi, WifiOff, Download } from 'lucide-react
 import Link from 'next/link'
 import { usePWA } from '@/hooks/usePWA'
 
+// Sessions + roster are cached here on every successful online load so the
+// scanner still works with zero connectivity at the field — the service
+// worker deliberately never caches supabase.co requests (those go through
+// the offline attendance queue instead), so without this, opening /scan
+// offline left the session picker permanently empty.
+const CACHE_SESSIONS_KEY = 'opfc_cached_sessions'
+const CACHE_PLAYERS_KEY = 'opfc_cached_players'
+
 export default function ScanPage() {
   const supabase = createClient()
   const { isOnline, isInstallable, installApp, queueOfflineAttendance, getOfflineQueue } = usePWA()
@@ -19,27 +27,64 @@ export default function ScanPage() {
 
   useEffect(() => {
     fetchSessions()
+    fetchRoster()
     loadOfflineQueue()
   }, [])
 
-  // Re-check offline queue when coming back online
+  // Re-check offline queue when coming back online, and refresh the caches
   useEffect(() => {
     if (isOnline) {
       loadOfflineQueue()
       syncOfflineRecords()
+      fetchSessions()
+      fetchRoster()
     }
   }, [isOnline])
 
+  function loadCachedSessions() {
+    try {
+      const cached = localStorage.getItem(CACHE_SESSIONS_KEY)
+      const data = cached ? JSON.parse(cached) : []
+      setSessions(data)
+      if (data.length === 1) setSelectedSession(data[0])
+    } catch { /* no cache available yet */ }
+  }
+
   async function fetchSessions() {
     const today = new Date().toISOString().split('T')[0]
-    const { data } = await supabase
-      .from('training_sessions')
-      .select('*')
-      .gte('date', today)
-      .lte('date', new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0])
-      .order('date')
-    setSessions(data ?? [])
-    if (data?.length === 1) setSelectedSession(data[0])
+    try {
+      const { data, error } = await supabase
+        .from('training_sessions')
+        .select('*')
+        .gte('date', today)
+        .lte('date', new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0])
+        .order('date')
+      if (error) throw error
+      setSessions(data ?? [])
+      if (data?.length === 1) setSelectedSession(data[0])
+      localStorage.setItem(CACHE_SESSIONS_KEY, JSON.stringify(data ?? []))
+    } catch {
+      // Offline or request failed — fall back to whatever was cached last time we were online
+      loadCachedSessions()
+    }
+  }
+
+  // Full active roster, cached so handleScan can resolve a scanned player
+  // offline without ever touching the network.
+  async function fetchRoster() {
+    try {
+      const { data, error } = await supabase.from('players').select('id, full_name, player_code, category').eq('is_active', true)
+      if (error) throw error
+      localStorage.setItem(CACHE_PLAYERS_KEY, JSON.stringify(data ?? []))
+    } catch { /* offline — keep the existing cache as-is */ }
+  }
+
+  function getCachedPlayer(playerId: string) {
+    try {
+      const cached = localStorage.getItem(CACHE_PLAYERS_KEY)
+      const list = cached ? JSON.parse(cached) : []
+      return list.find((p: any) => p.id === playerId) ?? null
+    } catch { return null }
   }
 
   async function loadOfflineQueue() {
@@ -73,12 +118,18 @@ export default function ScanPage() {
   async function handleScan(playerId: string): Promise<{ success: boolean; playerName: string; message?: string }> {
     if (!selectedSession) return { success: false, playerName: 'No session selected' }
 
-    // Get player info (from cache if offline)
-    const { data: player } = await supabase
-      .from('players')
-      .select('id, full_name, player_code, category')
-      .eq('id', playerId)
-      .single()
+    // Get player info — live when online, falling back to the cached roster
+    // (populated by fetchRoster) when offline or the request fails.
+    let player: any = null
+    if (isOnline) {
+      const { data } = await supabase
+        .from('players')
+        .select('id, full_name, player_code, category')
+        .eq('id', playerId)
+        .single()
+      player = data
+    }
+    if (!player) player = getCachedPlayer(playerId)
 
     if (!player) return { success: false, playerName: 'Player not found', message: `ID: ${playerId}` }
 

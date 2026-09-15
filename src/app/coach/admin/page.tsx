@@ -15,7 +15,12 @@ const ENTITY_LABEL: Record<string, string> = {
   player: 'Player', session: 'Session', field_sheet: 'Field Sheet', announcement: 'Announcement',
   point_rule: 'Point Rule', player_points: 'Points', global_award: 'Global Award',
   payment: 'Payment', expense: 'Expense', income: 'Income', inventory_item: 'Inventory',
-  settings: 'Settings', staff: 'Staff',
+  settings: 'Settings', staff: 'Staff', account: 'New Account',
+}
+
+const NEW_ACCOUNT_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+function isRecent(iso: string | null) {
+  return !!iso && Date.now() - new Date(iso).getTime() < NEW_ACCOUNT_WINDOW_MS
 }
 
 function timeAgo(iso: string | null) {
@@ -150,7 +155,10 @@ export default function SuperAdminPage() {
                     {filteredUsers.map((u, i) => (
                       <tr key={u.id} className={`border-b border-white/5 ${i % 2 === 0 ? '' : 'bg-white/2'}`}>
                         <td className="px-4 py-3">
-                          <div className="text-white text-sm font-medium">{u.full_name || '—'}</div>
+                          <div className="text-white text-sm font-medium flex items-center gap-1.5">
+                            {u.full_name || '—'}
+                            {isRecent(u.created_at) && <span className="badge bg-amber-500/15 text-amber-300 border-amber-500/25 text-[10px] py-0">New</span>}
+                          </div>
                           <div className="text-white/30 text-xs">{u.email}</div>
                         </td>
                         <td className="px-4 py-3"><span className={`badge text-xs ${ROLE_BADGE[u.role] ?? ROLE_BADGE.parent}`}>{u.role}</span></td>

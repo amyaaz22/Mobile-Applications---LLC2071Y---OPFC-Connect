@@ -114,6 +114,7 @@ function RecordPaymentModal({ players, entryFee, feeFor, methods, onClose, onSav
             <select className="input" value={form.status} onChange={e => set('status', e.target.value)}>
               <option value="paid">Paid</option>
               <option value="pending">Pending</option>
+              <option value="overdue">Overdue</option>
             </select>
           </div>
         </div>
