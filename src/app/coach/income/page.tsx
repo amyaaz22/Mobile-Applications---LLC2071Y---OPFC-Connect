@@ -24,12 +24,17 @@ export default function IncomePage() {
   const [sourceFilter, setSourceFilter] = useState('All')
   const [form, setForm] = useState({
     date: new Date().toISOString().split('T')[0], source: 'Donation',
-    donor_name: '', amount: '', category: '', notes: '',
+    donor_name: '', amount: '', category: '', notes: '', donor_profile_id: '',
   })
   const [receiptFile, setReceiptFile] = useState<File | null>(null)
   const [uploadingReceipt, setUploadingReceipt] = useState(false)
+  const [parents, setParents] = useState<any[]>([])
 
-  useEffect(() => { fetchIncome() }, [])
+  useEffect(() => {
+    fetchIncome()
+    supabase.from('profiles').select('id, full_name, email').eq('role', 'parent').order('full_name')
+      .then(({ data }) => setParents(data ?? []))
+  }, [])
 
   async function fetchIncome() {
     setLoading(true)
@@ -51,12 +56,15 @@ export default function IncomePage() {
       if (uploadError) { toast.error('Receipt upload failed: ' + uploadError.message); setSaving(false); return }
       receipt_url = path
     }
-    const { error } = await supabase.from('income').insert({ ...form, amount: +form.amount, receipt_url, created_by: user?.id })
+    const { error } = await supabase.from('income').insert({
+      ...form, amount: +form.amount, receipt_url, created_by: user?.id,
+      donor_profile_id: form.donor_profile_id || null,
+    })
     setSaving(false)
     if (error) { toast.error('Failed to save'); return }
     logAudit(supabase, { action: 'create', entity: 'income', summary: `Recorded income of Rs ${form.amount} (${form.source})` })
     toast.success('Income recorded')
-    setForm({ date: new Date().toISOString().split('T')[0], source: 'Donation', donor_name: '', amount: '', category: '', notes: '' })
+    setForm({ date: new Date().toISOString().split('T')[0], source: 'Donation', donor_name: '', amount: '', category: '', notes: '', donor_profile_id: '' })
     setReceiptFile(null)
     setShowForm(false)
     fetchIncome()
@@ -179,6 +187,16 @@ export default function IncomePage() {
             <label className="label mb-1.5 block">Donor / Sponsor Name</label>
             <input className="input" placeholder="e.g. MCB Foundation, Mr. Ramdin" value={form.donor_name} onChange={e => setForm(f => ({ ...f, donor_name: e.target.value }))}/>
           </div>
+          {parents.length > 0 && (
+            <div>
+              <label className="label mb-1.5 block">Link to a parent account (optional)</label>
+              <select className="input" value={form.donor_profile_id} onChange={e => setForm(f => ({ ...f, donor_profile_id: e.target.value }))}>
+                <option value="">Not linked</option>
+                {parents.map(p => <option key={p.id} value={p.id}>{p.full_name} — {p.email}</option>)}
+              </select>
+              <p className="text-white/25 text-xs mt-1">Shows this donation on their Statement of Account</p>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="label mb-1.5 block">Amount (Rs) *</label>
@@ -241,7 +259,10 @@ export default function IncomePage() {
                     <td className="px-4 py-3 text-white/50 text-xs whitespace-nowrap">{formatDate(e.date)}</td>
                     <td className="px-4 py-3"><span className="badge bg-green-500/10 text-green-300 border-green-500/20 text-xs">{e.source}</span></td>
                     <td className="px-4 py-3">
-                      <div className="text-white text-sm">{e.donor_name ?? '—'}</div>
+                      <div className="text-white text-sm flex items-center gap-1.5">
+                        {e.donor_name ?? '—'}
+                        {e.donor_profile_id && <span className="badge bg-teal-500/10 text-teal-300 border-teal-500/20 text-[10px] py-0">Linked</span>}
+                      </div>
                       {(e.category || e.notes) && <div className="text-white/30 text-xs">{[e.category, e.notes].filter(Boolean).join(' · ')}</div>}
                     </td>
                     <td className="px-4 py-3 text-white font-semibold text-sm whitespace-nowrap">Rs {e.amount.toLocaleString()}</td>

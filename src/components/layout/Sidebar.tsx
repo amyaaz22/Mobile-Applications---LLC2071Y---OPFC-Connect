@@ -43,6 +43,7 @@ const parentNav: { href: string; label: string; icon: JSX.Element; area?: Permis
   { href: '/parent/schedule', label: 'Schedule', icon: <CalendarDays size={18}/> },
   { href: '/parent/attendance', label: 'Attendance', icon: <BarChart3 size={18}/> },
   { href: '/parent/leaderboard', label: 'Leaderboard', icon: <Trophy size={18}/> },
+  { href: '/parent/statement', label: 'Statement of Account', icon: <Receipt size={18}/> },
 ]
 
 const playerNav: { href: string; label: string; icon: JSX.Element; area?: PermissionArea }[] = [
