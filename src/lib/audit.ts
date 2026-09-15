@@ -5,7 +5,7 @@ export type AuditEntity =
   | 'player' | 'session' | 'field_sheet' | 'announcement'
   | 'point_rule' | 'player_points' | 'global_award'
   | 'payment' | 'expense' | 'income' | 'inventory_item'
-  | 'settings' | 'staff'
+  | 'settings' | 'staff' | 'account'
 
 // Fire-and-forget: records one row in audit_log for the Super Admin panel.
 // Never throws or blocks the calling action — a logging failure (e.g. a

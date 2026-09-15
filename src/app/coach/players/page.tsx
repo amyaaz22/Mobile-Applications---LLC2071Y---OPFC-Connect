@@ -266,7 +266,10 @@ export default function PlayersPage() {
                             }
                           </div>
                           <div>
-                            <p className="text-white font-semibold text-sm">{p.full_name}</p>
+                            <p className="text-white font-semibold text-sm flex items-center gap-1.5">
+                              {p.full_name}
+                              {p.enrollment_status === 'trial' && <span className="badge bg-amber-500/15 text-amber-300 border-amber-500/25 text-[10px] py-0">Trial</span>}
+                            </p>
                             <p className="text-white/30 text-xs font-mono">{p.player_code}</p>
                           </div>
                         </div>

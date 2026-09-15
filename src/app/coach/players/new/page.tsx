@@ -31,6 +31,7 @@ export default function NewPlayerPage() {
     full_name: '', relationship: 'Father', phone_primary: '',
     phone_secondary: '', email: ''
   })
+  const [isTrial, setIsTrial] = useState(false)
 
   useEffect(() => {
     async function loadCategories() {
@@ -48,19 +49,22 @@ export default function NewPlayerPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setSaving(true)
-    const { data: newPlayer, error: pe } = await supabase.from('players').insert(player).select().single()
+    const { data: newPlayer, error: pe } = await supabase.from('players')
+      .insert({ ...player, enrollment_status: isTrial ? 'trial' : 'active' }).select().single()
     if (pe || !newPlayer) { toast.error('Failed to create player'); setSaving(false); return }
     const { error: ge } = await supabase.from('guardians').insert({ ...guardian, player_id: newPlayer.id })
     if (ge) { toast.error('Player created but guardian failed'); setSaving(false); return }
 
-    const { data: fees } = await supabase.from('club_settings').select('value').eq('key', 'fees').single()
-    const entryFee = (fees?.value as any)?.entry
-    if (entryFee) {
-      await supabase.from('payments').insert({ player_id: newPlayer.id, type: 'entry', amount: entryFee, status: 'pending' })
+    if (!isTrial) {
+      const { data: fees } = await supabase.from('club_settings').select('value').eq('key', 'fees').single()
+      const entryFee = (fees?.value as any)?.entry
+      if (entryFee) {
+        await supabase.from('payments').insert({ player_id: newPlayer.id, type: 'entry', amount: entryFee, status: 'pending' })
+      }
     }
 
-    logAudit(supabase, { action: 'create', entity: 'player', entity_id: newPlayer.id, summary: `Registered player "${player.full_name}" (${player.category})` })
-    toast.success(`${player.full_name} registered!`)
+    logAudit(supabase, { action: 'create', entity: 'player', entity_id: newPlayer.id, summary: `${isTrial ? 'Registered trial player' : 'Registered player'} "${player.full_name}" (${player.category})` })
+    toast.success(isTrial ? `${player.full_name} registered for a trial!` : `${player.full_name} registered!`)
     router.push(`/coach/players/${newPlayer.id}`)
   }
 
@@ -133,6 +137,13 @@ export default function NewPlayerPage() {
               <label className="label mb-1.5 block">Medical Notes</label>
               <textarea className="input resize-none" rows={2} value={player.medical_notes} onChange={e => setP('medical_notes', e.target.value)} placeholder="Allergies, conditions, medication…"/>
             </div>
+            <label className="flex items-start gap-3 p-3 rounded-xl border border-white/10 cursor-pointer hover:border-white/20">
+              <input type="checkbox" className="w-4 h-4 mt-0.5 accent-amber-400" checked={isTrial} onChange={e => setIsTrial(e.target.checked)}/>
+              <span>
+                <span className="text-white text-sm font-medium block">This is a trial session</span>
+                <span className="text-white/40 text-xs">No entry fee is charged yet — convert to a full member from the player's page once they're ready to officially join.</span>
+              </span>
+            </label>
             <button type="button" onClick={() => setStep(2)} disabled={!player.full_name || !player.date_of_birth}
               className="btn-primary w-full">Next: Guardian Info →</button>
           </div>
@@ -178,6 +189,11 @@ export default function NewPlayerPage() {
         {step === 3 && (
           <div className="card p-6 space-y-5">
             <h2 className="text-white font-bold">Confirm Registration</h2>
+            {isTrial && (
+              <div className="p-3 bg-amber-400/10 border border-amber-400/20 rounded-xl">
+                <p className="text-amber-300 text-xs font-bold">Trial registration — no entry fee charged yet</p>
+              </div>
+            )}
             <div className="space-y-3">
               {[
                 ['Player', player.full_name],

@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { toast } from 'react-hot-toast'
 import {
   Plus, Trash2, Download, Upload, Mail, Search, X,
-  ShieldCheck, Users2, UserMinus, UserPlus,
+  ShieldCheck, Users2, UserMinus, UserPlus, Contact,
 } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { PERMISSION_AREAS, hasPermission } from '@/lib/permissions'
@@ -218,6 +218,49 @@ export default function StaffPage() {
       loadAll()
     }
     reader.readAsBinaryString(file)
+  }
+
+  function normalizePhone(phone: string) {
+    const trimmed = phone.trim().replace(/[\s-]/g, '')
+    if (!trimmed) return ''
+    if (trimmed.startsWith('+')) return trimmed
+    if (/^\d{8}$/.test(trimmed)) return `+230${trimmed}` // Mauritius mobile numbers are 8 digits
+    return trimmed
+  }
+
+  function vcardEscape(s: string) {
+    return s.replace(/\\/g, '\\\\').replace(/,/g, '\\,').replace(/;/g, '\\;').replace(/\n/g, '\\n')
+  }
+
+  function exportContactsVCard() {
+    if (!guardians.length) { toast.error('No parent contacts to export'); return }
+    const cards = guardians
+      .filter(g => g.phone_primary)
+      .map(g => {
+        const playerName = g.player?.full_name ?? 'Unknown Player'
+        const displayName = `OPFC - ${g.full_name} (${g.relationship} of ${playerName})`
+        const lines = [
+          'BEGIN:VCARD',
+          'VERSION:3.0',
+          `FN:${vcardEscape(displayName)}`,
+          `N:${vcardEscape(g.full_name)};;;;`,
+          `ORG:${vcardEscape('Oasis Pailles Football Club')}`,
+          `TEL;TYPE=CELL:${normalizePhone(g.phone_primary)}`,
+        ]
+        if (g.phone_secondary) lines.push(`TEL;TYPE=HOME:${normalizePhone(g.phone_secondary)}`)
+        if (g.email) lines.push(`EMAIL:${vcardEscape(g.email)}`)
+        lines.push(`NOTE:${vcardEscape(`Guardian (${g.relationship}) of ${playerName}${g.player?.player_code ? ` — ${g.player.player_code}` : ''}`)}`)
+        lines.push('END:VCARD')
+        return lines.join('\r\n')
+      })
+    const blob = new Blob([cards.join('\r\n')], { type: 'text/vcard;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `OPFC_Parent_Contacts_${new Date().toISOString().split('T')[0]}.vcf`
+    a.click()
+    URL.revokeObjectURL(url)
+    toast.success(`${cards.length} contacts exported — import the .vcf file into your phone's Contacts app`)
   }
 
   function exportGuardians() {
@@ -469,6 +512,9 @@ export default function StaffPage() {
               <input ref={parentFileRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={importGuardians}/>
               <button onClick={exportGuardians} className="btn-secondary flex items-center gap-2 text-sm">
                 <Download size={14}/> Export
+              </button>
+              <button onClick={exportContactsVCard} className="btn-secondary flex items-center gap-2 text-sm" title="Download a .vcf file to bulk-import into your phone's Contacts app">
+                <Contact size={14}/> Export Contacts
               </button>
               <button onClick={() => setInviteRole('parent')} className="btn-primary flex items-center gap-2 text-sm">
                 <Plus size={14}/> Invite Parent

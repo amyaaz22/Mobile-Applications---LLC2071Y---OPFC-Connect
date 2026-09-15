@@ -20,7 +20,7 @@ Built for the club's daily operations AND as a Year 3 BSc dissertation project.
 - Push to GitHub main → Vercel auto-deploys (takes ~1 min)
 - Always run `npm run build` locally before pushing to catch errors
 - Environment variables are set in Vercel dashboard (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY)
-- **Before this deploys correctly, run `schema_v3_additions.sql` through `schema_v8_additions.sql` in the Supabase SQL Editor**, in order (all additive — safe on the live DB, and all already applied on the live project as of this writing). v3 adds expenses/income/inventory tables, fixes a profile role-escalation hole, widens payments.type, converts point_rules/global_awards category columns to arrays. v4 frees players.position / announcements.tag / inventory_items.condition from their old CHECK constraints (Club Settings → Dropdown Lists now owns those lists), seeds the new dropdown-list keys, and adds profiles.permissions for granular admin access. v5 adds the field_sheets table (Field Sheets feature). v6 adds payments.reference (optional transaction ref), income.receipt_url, a private `receipts` storage bucket for expense/income attachments, and seeds categories/fees/club_info if missing. v7 adds the `audit_log` table (Super Admin panel's Activity Log). v8 adds income.donor_profile_id (optional link from a donation to the parent who made it, for the Statement of Account).
+- **Before this deploys correctly, run `schema_v3_additions.sql` through `schema_v10_additions.sql` in the Supabase SQL Editor**, in order (all additive — safe on the live DB, and all already applied on the live project as of this writing). v3 adds expenses/income/inventory tables, fixes a profile role-escalation hole, widens payments.type, converts point_rules/global_awards category columns to arrays. v4 frees players.position / announcements.tag / inventory_items.condition from their old CHECK constraints (Club Settings → Dropdown Lists now owns those lists), seeds the new dropdown-list keys, and adds profiles.permissions for granular admin access. v5 adds the field_sheets table (Field Sheets feature). v6 adds payments.reference (optional transaction ref), income.receipt_url, a private `receipts` storage bucket for expense/income attachments, and seeds categories/fees/club_info if missing. v7 adds the `audit_log` table (Super Admin panel's Activity Log). v8 adds income.donor_profile_id (optional link from a donation to the parent who made it, for the Statement of Account). v9 extends `handle_new_user` to also log new signups into `audit_log` (self-registration doesn't go through the app's own `logAudit()`). v10 adds `players.enrollment_status` ('trial'|'active') for the trial-session onboarding flow.
 - Coach/parent invites (Staff & Parents page) send real emails via Supabase Auth — needs an email provider configured in the Supabase project (default Supabase SMTP is rate-limited; for real usage swap in a custom SMTP provider under Auth settings)
 
 ---
@@ -82,11 +82,11 @@ src/
     (auth)/login, register, forgot-password
     coach/
       page.tsx              — Dashboard
-      players/page.tsx      — Player list, category filter, Excel export, "Download All Cards" (bulk PDF)
-      players/[id]/page.tsx — Player detail + stats editor + QR
+      players/page.tsx      — Player list, category filter, Excel export, "Download All Cards" (bulk PDF), "Trial" badge for trial players
+      players/[id]/page.tsx — Player detail + stats editor + QR + "Convert to Full Member" banner for trial players
       players/[id]/edit/    — Edit player + guardian
-      players/new/          — Register new player (3-step)
-      players/import/       — Bulk Excel import
+      players/new/          — Register new player (3-step) — optional "trial session" checkbox skips the entry fee until converted
+      players/import/       — Bulk Excel import, optional Photo URL column (direct image link or Google Drive share link — auto-converted, fetched, and re-uploaded like a normal photo upload)
       sessions/page.tsx     — Sessions list
       sessions/[id]/        — Session detail + attendance register
       sessions/new/         — Create session
@@ -95,12 +95,12 @@ src/
       analytics/            — Analytics dashboard (charts)
       leaderboard/          — Points leaderboard
       points/               — Award points (rule-based batch + one-off custom) + manage rules
-      payments/             — Fee tracking (By Player grid + full ledger, Record Payment modal)
+      payments/             — Fee tracking (By Player grid + full ledger, Record Payment modal — status can be Paid/Pending/Overdue, and the month picker lets you create a standalone due for any past month)
       finance/              — Bird's-eye money dashboard: fees + income − expenses, trend chart
       income/               — Donations / sponsorships / fundraising income
       expenses/             — Club expenses (referee fees, transport, equipment, …)
       inventory/            — Kit/equipment tracking, low-stock alerts
-      staff/                — Admin-only: invite/promote coaches, manage parent contacts, granular permission chips per coach/admin
+      staff/                — Admin-only: invite/promote coaches, manage parent contacts, granular permission chips per coach/admin, "Export Contacts" (.vcf) for bulk-importing parent numbers into coaching staff phones
       announcements/        — Post/delete announcements
       settings/             — Club settings (logo, categories, fees) + Dropdown Lists (positions, guardian relationships, announcement tags, payment methods, expense/income/inventory categories, inventory conditions — every dropdown in the app that used to be hardcoded)
       admin/                — Super Admin panel (area 'system', admin-only): Accounts tab (every profile + last sign-in/email-confirmed from Supabase Auth) + Activity Log tab (audit_log, filterable by entity)
@@ -119,8 +119,8 @@ src/
       attendance/           — Attendance
       leaderboard/          — Club leaderboard (own player highlighted)
     scan/
-      page.tsx              — QR scanner (requires login)
-      live/page.tsx         — Live scanner (NO login, token-based)
+      page.tsx              — QR scanner (requires login). Caches the session list + active roster to localStorage on every successful online load and falls back to that cache when offline — the service worker deliberately never caches supabase.co requests, so without this the session picker (and player lookup during a scan) went permanently blank with no connectivity
+      live/page.tsx         — Live scanner (NO login, token-based) — note: does not yet have the same offline cache fallback as page.tsx above
     api/
       attendance/sync/      — Offline sync endpoint
       scan/verify/          — Live scanner token verification
@@ -171,6 +171,8 @@ supabase/
   schema_v6_additions.sql   — Additive migration: payments.reference, income.receipt_url, private `receipts` storage bucket, seeds categories/fees/club_info if missing (run AFTER v5)
   schema_v7_additions.sql   — Additive migration: audit_log table (append-only, admin-only read) for the Super Admin panel's Activity Log (run AFTER v6)
   schema_v8_additions.sql   — Additive migration: income.donor_profile_id, optional link from a donation to the parent's account (run AFTER v7)
+  schema_v9_additions.sql   — Additive migration: handle_new_user also logs new signups into audit_log (run AFTER v8)
+  schema_v10_additions.sql  — Additive migration: players.enrollment_status ('trial'|'active') for trial-session onboarding (run AFTER v9)
 ```
 
 ---
@@ -179,7 +181,7 @@ supabase/
 | Table | Purpose |
 |---|---|
 | `profiles` | Auth users + roles. `assigned_categories` (text[]) = soft coach scoping (see RBAC notes above) |
-| `players` | Player records (player_code auto-generates as OPFC-001) |
+| `players` | Player records (player_code auto-generates as OPFC-001). `enrollment_status` (v10, `'trial'|'active'`, default `'active'`) — a trial player skips the auto-created entry fee until converted from their detail page (see Key File Structure) |
 | `guardians` | Parent/guardian linked to player (no unique constraint on player_id — always check-then-write, never upsert on it) |
 | `player_stats` | Monthly ratings PAC/SHO/PAS/DRI/DEF/PHY + OVR (generated) |
 | `training_sessions` | Sessions with scan_token for live scanner |
@@ -195,12 +197,43 @@ supabase/
 | `global_awards` | Club-wide point events. `target_category` is `text[]`, same convention as `point_rules.category` |
 | `fan_card` | Parent-customisable card data |
 | `field_sheets` | On-field drill worksheets. `columns` (jsonb `[{key,label}]`) + `player_ids` (uuid[], ordered) define the grid; `data` (jsonb, `{player_id: {col_key: value}}`) holds the filled-in cells — one row per sheet, not a normalized cell table |
-| `audit_log` | Append-only activity trail for the Super Admin panel. `actor_id`/`actor_name`/`actor_role`, `action` (create/update/delete/invite/promote/demote/award), `entity` + `entity_id`, human-readable `summary`, optional `metadata` jsonb. Admin-only read via RLS; any coach/admin can insert (that's who performs actions) |
+| `audit_log` | Append-only activity trail for the Super Admin panel. `actor_id`/`actor_name`/`actor_role`, `action` (create/update/delete/invite/promote/demote/award), `entity` (…/`account` for new signups, logged directly by the `handle_new_user` trigger since self-registration never goes through the app's `logAudit()`) + `entity_id`, human-readable `summary`, optional `metadata` jsonb. Admin-only read via RLS; any coach/admin (or the trigger, running as a security-definer function) can insert |
 
 ---
 
 ## Current Known Issues / TODO
-Also done since the last update: parents now have a **Statement of Account**
+Also done since the last update: the Record Payment modal now has an
+**Overdue** status option (alongside Paid/Pending) — combined with the
+existing free month picker, this is how you create a standalone
+past-due for a specific player and month (e.g. September ended unpaid);
+the **QR scanner** (`/scan`) now caches the session list and active
+roster to `localStorage` on every successful online load and falls back
+to that cache when offline, fixing a real bug where the session picker
+(and player lookup mid-scan) went permanently blank with zero
+connectivity at the field — `/scan/live` (the no-login link-based
+scanner) doesn't have this fallback yet; new account signups (via
+`/register` or an invite) are now logged into `audit_log` automatically
+by the `handle_new_user` trigger, and the Super Admin Accounts tab
+flags accounts created in the last 7 days with a **New** badge — a true
+push/email notification the instant someone signs up still needs the
+Brevo SMTP/API setup to land first (see below), so this is in-app
+visibility only for now, not a ping to your phone; bulk player import
+(`players/import`) now accepts an optional **Photo URL** column — a
+direct image link or a Google Form/Sheets-collected Google Drive share
+link (auto-converted to a fetchable direct-view URL) — the photo is
+downloaded and re-uploaded into the same storage bucket a manual photo
+upload uses, falling back to storing the raw URL if the fetch is
+CORS-blocked; Staff & Parents has an **Export Contacts** button that
+downloads a standard `.vcf` file (`OPFC - <Guardian Name> (<Relationship>
+of <Player Name>)`, Mauritius numbers auto-prefixed `+230`) for bulk-importing
+every parent's number into coaching staff phones in one go; and players
+can now be registered as a **trial** (`enrollment_status`) — no entry fee
+charged, badged in the Players list, with a **Convert to Full Member**
+button on their detail page that flips them to active and creates the
+entry fee at that point, matching the club's real trial-session-then-
+official-onboarding workflow.
+
+Previously: parents now have a **Statement of Account**
 (`/parent/statement`) — outstanding balance, total paid, total contributed,
 and a chronological transaction list covering entry fee, monthly fees, and
 any "other" payments for their linked player, plus their own donations
@@ -235,6 +268,8 @@ the chips (and `togglePermission()` itself) now refuse a self-target.
 - [ ] Coach/parent invites need a real email provider configured in Supabase Auth (default SMTP is rate-limited) — see Deployment section. Decided: Brevo (free forever, 300 emails/day, no custom domain required — verify a single sender email instead of DNS). Still needs the actual account + SMTP key entered into Supabase Auth → SMTP Settings.
 - [ ] No payment gateway yet (Stripe / MCB Juice) — payments are still manually recorded (now with an optional transaction reference field, see above, but no actual processing/reconciliation)
 - [ ] Audit logging deliberately skips some routine/high-volume actions (QR attendance scans, Field Sheet cell autosaves, session status toggles, category-scope toggles, one-off point-award deletions, player stat edits) — extend `logAudit()` coverage if any of these turn out to need a trail too
+- [ ] `/scan/live` (the no-login, link-based scanner) doesn't have the same offline localStorage cache fallback `/scan` now has — still needs live network to validate the token and load the roster
+- [ ] New-account visibility is in-app only (Super Admin panel's "New" badge + Activity Log) — a real push/email ping to the admin the instant someone registers needs the Brevo SMTP/API setup finished first, then either a Supabase Database Webhook or scheduled check calling a transactional email API (SMTP alone, once configured, only covers Supabase Auth's own templates — invite/confirm/reset — not custom "notify the admin" emails)
 
 ---
 

@@ -31,8 +31,23 @@ interface ImportRow {
   guardian_relationship: string
   guardian_phone: string
   guardian_email: string
+  photo_url: string
   status?: 'pending' | 'success' | 'error'
   error?: string
+  photoWarning?: string
+}
+
+// Google Forms/Sheets photo uploads land as a Drive "share" link, which
+// isn't directly fetchable/embeddable as-is — rewrite it to Drive's
+// direct-view form. Any other URL (a direct image host, etc.) passes through.
+function resolvePhotoUrl(raw: string): string {
+  const url = raw.trim()
+  if (!url) return url
+  const fileIdMatch = url.match(/\/d\/([a-zA-Z0-9_-]+)/) || url.match(/[?&]id=([a-zA-Z0-9_-]+)/)
+  if (url.includes('drive.google.com') && fileIdMatch) {
+    return `https://drive.google.com/uc?export=view&id=${fileIdMatch[1]}`
+  }
+  return url
 }
 
 function buildSampleData(categories: string[], positions: string[]) {
@@ -53,6 +68,7 @@ function buildSampleData(categories: string[], positions: string[]) {
       'Guardian Relationship': 'Father',
       'Guardian Phone (WhatsApp)': '57123456',
       'Guardian Email': 'marc@email.mu',
+      'Photo URL': '',
     },
     {
       'Full Name': 'Rayan Boodhoo',
@@ -67,6 +83,7 @@ function buildSampleData(categories: string[], positions: string[]) {
       'Guardian Relationship': 'Mother',
       'Guardian Phone (WhatsApp)': '58234567',
       'Guardian Email': 'sarah@email.mu',
+      'Photo URL': '',
     },
     {
       'Full Name': 'Kian Bhookhun',
@@ -81,6 +98,7 @@ function buildSampleData(categories: string[], positions: string[]) {
       'Guardian Relationship': 'Mother',
       'Guardian Phone (WhatsApp)': '56456789',
       'Guardian Email': '',
+      'Photo URL': '',
     },
   ]
 }
@@ -96,6 +114,7 @@ function downloadSample(categories: string[], positions: string[]) {
     { wch: 24 }, { wch: 22 }, { wch: 16 }, { wch: 12 },
     { wch: 14 }, { wch: 30 }, { wch: 28 }, { wch: 22 },
     { wch: 22 }, { wch: 22 }, { wch: 22 }, { wch: 24 },
+    { wch: 40 },
   ]
 
   XLSX.utils.book_append_sheet(wb, ws, 'Players')
@@ -113,8 +132,12 @@ function downloadSample(categories: string[], positions: string[]) {
     ['6. Guardian Phone should be the WhatsApp number'],
     ['7. Guardian Email is optional but recommended for player card delivery'],
     ['8. Medical Notes is optional — leave blank if none'],
-    ['9. You can delete the 3 sample rows before filling in your data'],
-    ['10. Save as .xlsx and upload in the Import Players page'],
+    ['9. Photo URL is optional — a direct image link, or a Google Drive'],
+    ['    share link (e.g. from a Google Form photo-upload question) set'],
+    ['    to "Anyone with the link can view". It\'s downloaded and attached'],
+    ['    to the player automatically, same as uploading one by hand.'],
+    ['10. You can delete the 3 sample rows before filling in your data'],
+    ['11. Save as .xlsx and upload in the Import Players page'],
   ]
   const ws2 = XLSX.utils.aoa_to_sheet(instructions)
   ws2['!cols'] = [{ wch: 70 }]
@@ -172,6 +195,7 @@ function validateRow(row: any, i: number, categories: string[], positions: strin
     guardian_relationship: String(row['Guardian Relationship'] ?? 'Parent').trim() || 'Parent',
     guardian_phone: String(row['Guardian Phone (WhatsApp)'] ?? '').trim(),
     guardian_email: String(row['Guardian Email'] ?? '').trim(),
+    photo_url: String(row['Photo URL'] ?? '').trim(),
     status: errors.length ? 'error' : 'pending',
     error: errors.join(', '),
   }
@@ -214,6 +238,28 @@ export default function ImportPlayersPage() {
       setDone(false)
     }
     reader.readAsBinaryString(file)
+  }
+
+  async function attachPhoto(playerId: string, rawUrl: string): Promise<string | undefined> {
+    const url = resolvePhotoUrl(rawUrl)
+    try {
+      const res = await fetch(url)
+      if (!res.ok) throw new Error('fetch failed')
+      const blob = await res.blob()
+      const ext = (blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg')
+      const path = `players/${playerId}/photo.${ext}`
+      const { error: uploadError } = await supabase.storage.from('avatars').upload(path, blob, { upsert: true, contentType: blob.type || 'image/jpeg' })
+      if (uploadError) throw uploadError
+      const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path)
+      await supabase.from('players').update({ photo_url: publicUrl }).eq('id', playerId)
+      return undefined
+    } catch {
+      // Couldn't fetch/re-upload (often a CORS-blocked host) — fall back to
+      // storing the URL directly. <img> tags aren't subject to the same CORS
+      // restriction as fetch(), so this still renders on the card most of the time.
+      await supabase.from('players').update({ photo_url: url }).eq('id', playerId)
+      return 'Photo saved as a direct link (could not download a copy) — verify it appears on the card'
+    }
   }
 
   async function runImport() {
@@ -270,7 +316,10 @@ export default function ImportPlayersPage() {
           await supabase.from('payments').insert({ player_id: player.id, type: 'entry', amount: entryFee, status: 'pending' })
         }
 
-        updated[i] = { ...r, status: 'success' }
+        let photoWarning: string | undefined
+        if (r.photo_url) photoWarning = await attachPhoto(player.id, r.photo_url)
+
+        updated[i] = { ...r, status: 'success', photoWarning }
         success++
       } catch (err: any) {
         updated[i] = { ...r, status: 'error', error: err.message }
@@ -437,6 +486,18 @@ export default function ImportPlayersPage() {
               <div className="text-white/40 text-sm mt-1">Failed</div>
             </div>
           </div>
+
+          {rows.some(r => r.photoWarning) && (
+            <div className="card p-4 border-amber-500/20">
+              <h3 className="text-amber-400 font-bold text-sm mb-3">Photo notices:</h3>
+              {rows.filter(r => r.photoWarning).map((r, i) => (
+                <div key={i} className="py-1.5 border-b border-white/5 last:border-0">
+                  <span className="text-white text-sm font-medium">{r.full_name}</span>
+                  <p className="text-amber-400/70 text-xs mt-0.5">{r.photoWarning}</p>
+                </div>
+              ))}
+            </div>
+          )}
 
           {results.failed > 0 && (
             <div className="card p-4">

@@ -5,10 +5,11 @@ import { useParams, useRouter } from 'next/navigation'
 import PassCard from '@/components/cards/PassCard'
 import { categoryColor, formatDate, getAge, getCurrentMonth, paymentStatusColor } from '@/lib/utils'
 import { toast } from 'react-hot-toast'
-import { ArrowLeft, Edit3, Save, Trash2 } from 'lucide-react'
+import { ArrowLeft, Edit3, Save, Trash2, UserCheck } from 'lucide-react'
 import Link from 'next/link'
 import QRCode from 'qrcode'
 import { usePermissionGuard } from '@/hooks/usePermissionGuard'
+import { logAudit } from '@/lib/audit'
 
 const STAT_KEYS = ['pac', 'sho', 'pas', 'dri', 'def', 'phy'] as const
 const STAT_LABELS: Record<string, string> = {
@@ -78,6 +79,24 @@ export default function PlayerDetailPage() {
     setAttendance(att ?? [])
   }
 
+  async function convertToMember() {
+    if (!confirm(`Officially onboard ${player.full_name} as a full member? This creates their entry fee.`)) return
+    setSaving(true)
+    const { error } = await supabase.from('players').update({ enrollment_status: 'active' }).eq('id', params.id as string)
+    if (error) { toast.error('Failed to convert: ' + error.message); setSaving(false); return }
+
+    const { data: fees } = await supabase.from('club_settings').select('value').eq('key', 'fees').single()
+    const entryFee = (fees?.value as any)?.entry
+    if (entryFee) {
+      await supabase.from('payments').insert({ player_id: params.id as string, type: 'entry', amount: entryFee, status: 'pending' })
+    }
+
+    logAudit(supabase, { action: 'update', entity: 'player', entity_id: params.id as string, summary: `Converted "${player.full_name}" from trial to full member` })
+    toast.success(`${player.full_name} is now a full member!`)
+    setSaving(false)
+    fetchPlayer()
+  }
+
   async function deleteAward(id: string) {
     if (!confirm('Remove this points award? This cannot be undone.')) return
     await supabase.from('player_points').delete().eq('id', id)
@@ -144,6 +163,18 @@ export default function PlayerDetailPage() {
       <Link href="/coach/players" className="inline-flex items-center gap-2 text-white/40 hover:text-white text-sm mb-6 transition-colors">
         <ArrowLeft size={16}/> All Players
       </Link>
+
+      {player.enrollment_status === 'trial' && (
+        <div className="card p-4 mb-6 border-amber-500/20 bg-amber-500/5 flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <p className="text-amber-400 text-sm font-bold">Trial Player</p>
+            <p className="text-amber-400/70 text-xs mt-0.5">Attending on a trial basis — no entry fee charged yet. Convert once they're ready to officially join.</p>
+          </div>
+          <button onClick={convertToMember} disabled={saving} className="btn-primary flex items-center gap-2 text-sm flex-shrink-0">
+            <UserCheck size={14}/> Convert to Full Member
+          </button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left: Pass Card (front + back PDF) */}
