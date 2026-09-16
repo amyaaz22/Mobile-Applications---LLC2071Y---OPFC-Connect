@@ -34,6 +34,20 @@ function RecordPaymentModal({ players, entryFee, feeFor, methods, onClose, onSav
   async function save() {
     if (!form.player_id) { toast.error('Select a player'); return }
     if (!form.amount || +form.amount <= 0) { toast.error('Enter an amount'); return }
+
+    // Entry/monthly are meant to be one row per player/period — warn before
+    // creating a second one, rather than silently duplicating (an "other"
+    // payment can legitimately repeat, so it's not checked here).
+    if (form.type === 'entry' || form.type === 'monthly') {
+      let dupQuery = supabase.from('payments').select('id, status').eq('player_id', form.player_id).eq('type', form.type)
+      if (form.type === 'monthly') dupQuery = dupQuery.eq('month', form.month)
+      const { data: existing } = await dupQuery.limit(1).maybeSingle()
+      if (existing) {
+        const label = form.type === 'entry' ? 'an entry fee' : `a ${getMonthLabel(form.month)} fee`
+        if (!confirm(`${player?.full_name ?? 'This player'} already has ${label} recorded (status: ${existing.status}). Record another one anyway?`)) return
+      }
+    }
+
     setSaving(true)
     const { data: { user } } = await supabase.auth.getUser()
     const { error } = await supabase.from('payments').insert({
@@ -173,7 +187,7 @@ export default function PaymentsPage() {
   async function fetchData() {
     setLoading(true)
     const [{ data: ps }, { data: pays }, { data: entries }] = await Promise.all([
-      supabase.from('players').select('id, full_name, player_code, category').eq('is_active', true).order('full_name'),
+      supabase.from('players').select('id, full_name, player_code, category').eq('is_active', true).neq('enrollment_status', 'trial').order('full_name'),
       supabase.from('payments').select('*').eq('month', month).eq('type', 'monthly'),
       supabase.from('payments').select('*').eq('type', 'entry'),
     ])
@@ -184,12 +198,25 @@ export default function PaymentsPage() {
   }
 
   async function fetchLedger() {
-    const { data } = await supabase
-      .from('payments')
-      .select('*, player:players(full_name, player_code, category)')
-      .order('created_at', { ascending: false })
-      .limit(500)
-    setAllPayments(data ?? [])
+    // A flat .limit(500) silently truncated both the ledger export and the
+    // "Total collected" figure once the club passed 500 lifetime payment
+    // rows — page through in batches instead so both stay accurate no
+    // matter how long the club has been running.
+    const pageSize = 1000
+    let page = 0
+    let all: any[] = []
+    while (true) {
+      const { data } = await supabase
+        .from('payments')
+        .select('*, player:players(full_name, player_code, category)')
+        .order('created_at', { ascending: false })
+        .range(page * pageSize, page * pageSize + pageSize - 1)
+      if (!data?.length) break
+      all = all.concat(data)
+      if (data.length < pageSize) break
+      page++
+    }
+    setAllPayments(all)
   }
 
   function getPayment(playerId: string) {

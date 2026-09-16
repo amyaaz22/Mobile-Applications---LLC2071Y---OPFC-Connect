@@ -1,13 +1,11 @@
 'use client'
 import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
 import { toast } from 'react-hot-toast'
 import { LogOut, Save, Shield } from 'lucide-react'
 
 export default function CoachProfilePage() {
   const supabase = createClient()
-  const router = useRouter()
   const [profile, setProfile] = useState<any>(null)
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
@@ -48,7 +46,7 @@ export default function CoachProfilePage() {
 
   async function handleLogout() {
     await supabase.auth.signOut()
-    router.push('/login')
+    window.location.href = '/login'
   }
 
   if (!profile) return (

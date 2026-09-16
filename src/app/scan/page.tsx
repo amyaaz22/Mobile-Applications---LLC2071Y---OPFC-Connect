@@ -17,7 +17,7 @@ const CACHE_PLAYERS_KEY = 'opfc_cached_players'
 
 export default function ScanPage() {
   const supabase = createClient()
-  const { isOnline, isInstallable, installApp, queueOfflineAttendance, getOfflineQueue } = usePWA()
+  const { isOnline, isInstallable, installApp, queueOfflineAttendance, getOfflineQueue, removeOfflineAttendance } = usePWA()
   const [sessions, setSessions] = useState<any[]>([])
   const [selectedSession, setSelectedSession] = useState<any>(null)
   const [scanLog, setScanLog] = useState<any[]>([])
@@ -62,7 +62,12 @@ export default function ScanPage() {
       if (error) throw error
       setSessions(data ?? [])
       if (data?.length === 1) setSelectedSession(data[0])
-      localStorage.setItem(CACHE_SESSIONS_KEY, JSON.stringify(data ?? []))
+      // Isolated from the fetch's own try/catch: a storage-write failure
+      // (private browsing, quota) must not fall through to the catch below
+      // and clobber the correct state we just set with stale cached data.
+      try {
+        localStorage.setItem(CACHE_SESSIONS_KEY, JSON.stringify(data ?? []))
+      } catch { /* cache write failed — fresh state above is still correct */ }
     } catch {
       // Offline or request failed — fall back to whatever was cached last time we were online
       loadCachedSessions()
@@ -106,10 +111,16 @@ export default function ScanPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(record),
         })
-        if (res.ok) synced++
-      } catch { /* retry later */ }
+        if (res.ok) {
+          synced++
+          await removeOfflineAttendance(record.id)
+        } else {
+          const data = await res.json().catch(() => ({}))
+          if (data.permanent) await removeOfflineAttendance(record.id)
+        }
+      } catch { /* transient — retry later */ }
     }
-    if (synced > 0) {
+    if (synced > 0 || queue.length) {
       await loadOfflineQueue()
     }
     setSyncing(false)
@@ -143,7 +154,14 @@ export default function ScanPage() {
     }
 
     if (!isOnline) {
-      // Queue for later sync
+      // Queue for later sync — but check the offline queue itself first so
+      // scanning the same player twice while offline doesn't queue a
+      // duplicate check-in (the online path already guards against this
+      // via the `existing` lookup below).
+      const queue = await getOfflineQueue()
+      const alreadyQueued = queue.some(r => r.session_id === selectedSession.id && r.player_id === playerId)
+      if (alreadyQueued) return { success: false, playerName: player.full_name, message: 'Already checked in (offline)' }
+
       await queueOfflineAttendance(record)
       setScanCount(c => c + 1)
       setScanLog(log => [{ player, time: new Date(), offline: true }, ...log.slice(0, 19)])
