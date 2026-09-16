@@ -20,7 +20,7 @@ Built for the club's daily operations AND as a Year 3 BSc dissertation project.
 - Push to GitHub main → Vercel auto-deploys (takes ~1 min)
 - Always run `npm run build` locally before pushing to catch errors
 - Environment variables are set in Vercel dashboard (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY)
-- **Before this deploys correctly, run `schema_v3_additions.sql` through `schema_v10_additions.sql` in the Supabase SQL Editor**, in order (all additive — safe on the live DB, and all already applied on the live project as of this writing). v3 adds expenses/income/inventory tables, fixes a profile role-escalation hole, widens payments.type, converts point_rules/global_awards category columns to arrays. v4 frees players.position / announcements.tag / inventory_items.condition from their old CHECK constraints (Club Settings → Dropdown Lists now owns those lists), seeds the new dropdown-list keys, and adds profiles.permissions for granular admin access. v5 adds the field_sheets table (Field Sheets feature). v6 adds payments.reference (optional transaction ref), income.receipt_url, a private `receipts` storage bucket for expense/income attachments, and seeds categories/fees/club_info if missing. v7 adds the `audit_log` table (Super Admin panel's Activity Log). v8 adds income.donor_profile_id (optional link from a donation to the parent who made it, for the Statement of Account). v9 extends `handle_new_user` to also log new signups into `audit_log` (self-registration doesn't go through the app's own `logAudit()`). v10 adds `players.enrollment_status` ('trial'|'active') for the trial-session onboarding flow.
+- **Before this deploys correctly, run `schema_v3_additions.sql` through `schema_v11_additions.sql` in the Supabase SQL Editor**, in order (all additive — safe on the live DB, and all already applied on the live project as of this writing). v3 adds expenses/income/inventory tables, fixes a profile role-escalation hole, widens payments.type, converts point_rules/global_awards category columns to arrays. v4 frees players.position / announcements.tag / inventory_items.condition from their old CHECK constraints (Club Settings → Dropdown Lists now owns those lists), seeds the new dropdown-list keys, and adds profiles.permissions for granular admin access. v5 adds the field_sheets table (Field Sheets feature). v6 adds payments.reference (optional transaction ref), income.receipt_url, a private `receipts` storage bucket for expense/income attachments, and seeds categories/fees/club_info if missing. v7 adds the `audit_log` table (Super Admin panel's Activity Log). v8 adds income.donor_profile_id (optional link from a donation to the parent who made it, for the Statement of Account). v9 extends `handle_new_user` to also log new signups into `audit_log` (self-registration doesn't go through the app's own `logAudit()`). v10 adds `players.enrollment_status` ('trial'|'active') for the trial-session onboarding flow. v11 fixes two production bugs found in a code audit: `protect_profile_role` was keyed on `auth.uid()`, which is NULL for service-role requests — this silently reverted the role/permissions set by `/api/staff/invite` (a service-role route) back to the trigger's "no admin found, keep old value" branch, so every invited coach landed back on the default `parent` role until manually promoted again; the trigger now also allows `auth.role() = 'service_role'` through. It also adds the missing `income` RLS SELECT policy for `donor_profile_id = auth.uid()` — without it, a parent's Statement of Account silently showed Rs 0 in donations with no error, because the only existing `income` policy was the admin/coach "manage all" one.
 - Coach/parent invites (Staff & Parents page) send real emails via Supabase Auth — needs an email provider configured in the Supabase project (default Supabase SMTP is rate-limited; for real usage swap in a custom SMTP provider under Auth settings)
 
 ---
@@ -67,7 +67,7 @@ Built for the club's daily operations AND as a Year 3 BSc dissertation project.
 **To set the first admin:** `UPDATE public.profiles SET role = 'admin' WHERE email = 'aumeeramyaaz@gmail.com';` — after that, use **Staff & Parents** (`/coach/staff`, admin-only) to invite or promote further coaches; no more manual SQL needed.
 
 **RBAC notes (relevant to the dissertation writeup):**
-- `profiles.role` is protected by a `BEFORE UPDATE` trigger (`protect_profile_role`, added in `schema_v3_additions.sql`) — a signed-in user cannot grant themselves a higher role by calling `supabase.from('profiles').update({ role: 'admin' })` directly; only an existing admin's update is honored. This closed a real self-escalation hole that existed in `schema_v2.sql`.
+- `profiles.role` is protected by a `BEFORE UPDATE` trigger (`protect_profile_role`, added in `schema_v3_additions.sql`) — a signed-in user cannot grant themselves a higher role by calling `supabase.from('profiles').update({ role: 'admin' })` directly; only an existing admin's update is honored. This closed a real self-escalation hole that existed in `schema_v2.sql`. The trigger also honors `auth.role() = 'service_role'` (added in `schema_v11_additions.sql`) — `auth.uid()` is NULL for requests made with the service-role key (no user JWT), so before v11 the trigger was silently reverting the role/permissions changes made by service-role API routes like `/api/staff/invite`. Any future server-side route that updates `role`/`permissions` with the service-role client relies on this.
 - `profiles.assigned_categories` (text[]) is a separate, orthogonal mechanism: it scopes *which categories' data* a coach sees (via `useScopedCategories()`, `src/hooks/useScopedCategories.ts`) — wired into Players, Sessions (list + create), Attendance, Points, and Announcements (filter chips/lists + narrowed "create" dropdowns, "All" hidden once scoped). UI-level convenience only — every `players`/`sessions`/`payments`/etc. RLS policy still grants full data access to any `coach` regardless of this field. Promoting it to a real RLS boundary is future work.
 - `profiles.permissions` (text[], v4, greatly expanded in v7) is granular **feature/page access control** — *which areas of the app* an account can reach at all — and, since v7, applies to **both `admin` and `coach`** accounts (originally admin-only). See `src/lib/permissions.ts` for the full area list (`PERMISSION_AREAS`, 16 areas — one per page/module: players, sessions, attendance, field_sheets, analytics, leaderboard, points, announcements, finance, payments, income, expenses, inventory, settings, staff, system) and `hasPermission()`. Null/empty = unrestricted (the default — every existing account, admin or coach, keeps full access until deliberately narrowed). `staff` and `system` are hard-locked to `role==='admin'` in `hasPermission()` regardless of the permissions list — a coach can never be granted staff management or the Super Admin panel. Only an *unrestricted admin* can change anyone's `role` or `permissions` at all — including narrowing a coach — enforced by the same `protect_profile_role` trigger (extended in v4); a narrowed account can never grant itself (or anyone) more access. Enforced client-side via `usePermissionGuard(area)` at the top of every gated page, plus a matching filter in both `Sidebar.tsx` and `MobileNav.tsx`.
   - **Self-lockout guard:** the Staff & Parents permission chips are disabled on the viewer's own row (`c.id === viewerId`), and `togglePermission()` itself refuses a self-target — an unrestricted admin narrowing *themselves* would otherwise instantly lock them out of Staff & Parents with no in-app recovery path (this happened once in production; recovered via direct Supabase access, see git history around the fix).
@@ -119,7 +119,7 @@ src/
       attendance/           — Attendance
       leaderboard/          — Club leaderboard (own player highlighted)
     scan/
-      page.tsx              — QR scanner (requires login). Caches the session list + active roster to localStorage on every successful online load and falls back to that cache when offline — the service worker deliberately never caches supabase.co requests, so without this the session picker (and player lookup during a scan) went permanently blank with no connectivity
+      page.tsx              — QR scanner (requires login). Caches the session list + active roster to localStorage on every successful online load and falls back to that cache when offline — the service worker deliberately never caches supabase.co requests, so without this the session picker (and player lookup during a scan) went permanently blank with no connectivity. Offline scans queue in IndexedDB and are de-duplicated against the queue itself before being added (mirroring the online path's existing-row check); the foreground sync loop removes each record from the queue once it syncs successfully or permanently fails (e.g. its session was deleted, a Postgres FK violation), rather than only the service worker's background `sync` event doing so — that event isn't supported on every browser (iOS Safari has no Background Sync API at all), so already-synced scans used to keep getting re-submitted forever
       live/page.tsx         — Live scanner (NO login, token-based) — note: does not yet have the same offline cache fallback as page.tsx above
     api/
       attendance/sync/      — Offline sync endpoint
@@ -173,6 +173,7 @@ supabase/
   schema_v8_additions.sql   — Additive migration: income.donor_profile_id, optional link from a donation to the parent's account (run AFTER v7)
   schema_v9_additions.sql   — Additive migration: handle_new_user also logs new signups into audit_log (run AFTER v8)
   schema_v10_additions.sql  — Additive migration: players.enrollment_status ('trial'|'active') for trial-session onboarding (run AFTER v9)
+  schema_v11_additions.sql  — Additive migration: protect_profile_role trigger now also honors auth.role()='service_role' (fixes invite role reversion), adds the missing income RLS SELECT policy for donor_profile_id (run AFTER v10)
 ```
 
 ---
@@ -188,7 +189,7 @@ supabase/
 | `attendance` | QR scan records |
 | `payments` | `type` in `entry` / `monthly` / `other`; has `method` column and an optional `reference` (bank transfer ref / Juice transaction ID / etc, freeform, never required). Entry-fee row auto-created (status `pending`) on player registration and import |
 | `expenses` | Club spending: referee fees, transport, equipment, etc. `receipt_url` (optional) is an object path in the private `receipts` storage bucket, not a public URL — view via `ReceiptLink` (signed URL) |
-| `income` | Donations, sponsorships, fundraising — anything that isn't a player fee. Same optional `receipt_url` convention as `expenses`. `donor_profile_id` (v8, optional) links a donation to the parent's account so it shows on their Statement of Account — set via a select in the Record Income form when a parent profile exists |
+| `income` | Donations, sponsorships, fundraising — anything that isn't a player fee. Same optional `receipt_url` convention as `expenses`. `donor_profile_id` (v8, optional) links a donation to the parent's account so it shows on their Statement of Account — set via a select in the Record Income form when a parent profile exists. RLS: admin/coach have full access, and (since v11) a parent can `select` their own linked donations via `donor_profile_id = auth.uid()` |
 | `inventory_items` | Kit/equipment: quantity, condition, `min_stock` drives the low-stock flag, optional `assigned_to` player |
 | `announcements` | Club-wide messages |
 | `club_settings` | Dynamic config: categories (plain string array, e.g. `["U9","U13"]` — never `{name: ...}` objects), fees, club_info (logo_url) |
@@ -202,6 +203,50 @@ supabase/
 ---
 
 ## Current Known Issues / TODO
+A second full audit (security, financial-logic, offline/PWA, general code
+quality) found and fixed several real bugs, some already live in
+production: invited coaches were silently reverted to `parent` by the
+`protect_profile_role` trigger (`auth.uid()` is NULL for service-role
+requests — see RBAC notes and schema v11 above) — every invite this
+session was affected until fixed, so **any account invited before this
+fix should have its role/permissions double-checked in Staff & Parents**;
+a parent's Statement of Account always showed Rs 0 in donations because
+`income` had no RLS policy letting a parent read their own linked rows
+(schema v11); `/api/staff/invite` checked `role==='admin'` instead of
+`hasPermission(caller,'staff')`, so a narrowed admin could still invite via
+a raw API call; `demoteAdmin()` on the Staff page had no self-target guard
+(unlike `togglePermission()`, fixed after an earlier real lockout); trial
+players could still be charged an entry fee from the Payments grid before
+conversion, and `convertToMember()` didn't check for an existing entry-fee
+row, so a player could be double-charged; the Record Payment modal always
+did a blind insert (unlike `markPaid()`), so re-recording a payment for a
+player who already had one created a silent duplicate that inflated "Total
+collected" and the ledger export (now soft-blocked with a confirmation
+naming the existing row); the offline scanner's `handleScan()` queued every
+scan unconditionally with no duplicate check (now checks the offline queue
+itself first, mirroring the online path); the foreground sync loop never
+actually removed synced records from IndexedDB at all — only the service
+worker's background `sync` event did, which iOS Safari doesn't support —
+so already-synced offline scans could be resubmitted forever (now fixed,
+plus permanently-failed records, e.g. an FK violation from a deleted
+session, are also dropped instead of retried forever); offline-synced
+attendance rows never got `scanned_by` set, breaking the
+scanned-by-provenance guarantee documented above (now set from the
+authenticated session in `/api/attendance/sync`); and `/scan`'s
+`fetchSessions()` could clobber a just-fetched, correct online session list
+with stale cached data if the `localStorage.setItem` call itself threw
+(private browsing, quota) — the cache write is now isolated from the fetch's
+own catch block. Also: the payments ledger's flat `.limit(500)` silently
+truncated both the Excel export and the "Total collected" figure once a
+club passed 500 lifetime payment rows — now pages through in batches of
+1000 instead; logout now goes through `window.location.href = '/login'`
+everywhere (the coach Profile page previously used `router.push`, which
+doesn't force the hard reload this app's auth model relies on — see
+Architecture Decisions); and bulk player import's Photo URL feature now
+verifies the fetched content is actually an `image/*` before uploading it as
+a player's photo, instead of trusting whatever a share link happened to
+return.
+
 Also done since the last update: the Record Payment modal now has an
 **Overdue** status option (alongside Paid/Pending) — combined with the
 existing free month picker, this is how you create a standalone
@@ -270,6 +315,7 @@ the chips (and `togglePermission()` itself) now refuse a self-target.
 - [ ] Audit logging deliberately skips some routine/high-volume actions (QR attendance scans, Field Sheet cell autosaves, session status toggles, category-scope toggles, one-off point-award deletions, player stat edits) — extend `logAudit()` coverage if any of these turn out to need a trail too
 - [ ] `/scan/live` (the no-login, link-based scanner) doesn't have the same offline localStorage cache fallback `/scan` now has — still needs live network to validate the token and load the roster
 - [ ] New-account visibility is in-app only (Super Admin panel's "New" badge + Activity Log) — a real push/email ping to the admin the instant someone registers needs the Brevo SMTP/API setup finished first, then either a Supabase Database Webhook or scheduled check calling a transactional email API (SMTP alone, once configured, only covers Supabase Auth's own templates — invite/confirm/reset — not custom "notify the admin" emails)
+- [ ] Deferred as low-severity/code-quality from the second audit (not fixed this round): `/scan` has no `CoachGuard` wrapper of its own (relies on being unreachable without a session in practice); a few small duplicated UI bits (spinner markup, tooltip patterns) could be extracted into shared components; some dashboard summary cards don't live-refresh after a mutation elsewhere on the page (a manual reload picks up the change).
 
 ---
 

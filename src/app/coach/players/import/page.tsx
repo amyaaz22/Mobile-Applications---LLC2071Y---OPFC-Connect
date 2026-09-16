@@ -246,6 +246,11 @@ export default function ImportPlayersPage() {
       const res = await fetch(url)
       if (!res.ok) throw new Error('fetch failed')
       const blob = await res.blob()
+      // A share link that isn't actually a direct image (an HTML error/sign-in
+      // page, a Drive "can't preview" response, etc.) would otherwise get
+      // uploaded and stored as if it were a real photo — reject anything that
+      // doesn't come back with an image content-type.
+      if (!blob.type.startsWith('image/')) throw new Error('not an image')
       const ext = (blob.type.split('/')[1] || 'jpg').replace('jpeg', 'jpg')
       const path = `players/${playerId}/photo.${ext}`
       const { error: uploadError } = await supabase.storage.from('avatars').upload(path, blob, { upsert: true, contentType: blob.type || 'image/jpeg' })

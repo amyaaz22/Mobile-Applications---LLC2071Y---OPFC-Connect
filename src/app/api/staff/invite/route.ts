@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient, createAdminClient } from '@/lib/supabase/server'
+import { hasPermission } from '@/lib/permissions'
 
-// Admin-only: invite a brand-new person by email and set their role directly.
-// The caller's session is verified against profiles.role='admin' before the
+// Admin-only (area 'staff'): invite a brand-new person by email and set
+// their role directly. The caller's session is verified before the
 // service-role client (which bypasses RLS) is ever touched.
 export async function POST(req: NextRequest) {
   try {
@@ -10,9 +11,9 @@ export async function POST(req: NextRequest) {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return NextResponse.json({ error: 'Not signed in' }, { status: 401 })
 
-    const { data: caller } = await supabase.from('profiles').select('role').eq('id', user.id).single()
-    if (caller?.role !== 'admin') {
-      return NextResponse.json({ error: 'Only admins can invite new accounts' }, { status: 403 })
+    const { data: caller } = await supabase.from('profiles').select('role, permissions').eq('id', user.id).single()
+    if (!hasPermission(caller, 'staff')) {
+      return NextResponse.json({ error: 'Only admins with Staff & Parents access can invite new accounts' }, { status: 403 })
     }
 
     const { email, full_name, role } = await req.json()
@@ -34,7 +35,13 @@ export async function POST(req: NextRequest) {
 
     const newId = invited.user?.id
     if (newId) {
-      await admin.from('profiles').update({ role, full_name }).eq('id', newId)
+      const { error: roleError } = await admin.from('profiles').update({ role, full_name }).eq('id', newId)
+      if (roleError) {
+        return NextResponse.json({
+          success: true,
+          warning: `Invite sent, but setting their role failed: ${roleError.message}. Use "Promote existing user" once they've confirmed their email.`,
+        })
+      }
     }
 
     return NextResponse.json({ success: true })

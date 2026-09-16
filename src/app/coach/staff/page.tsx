@@ -30,7 +30,7 @@ function InviteModal({ role, onClose, onSent }: { role: 'coach' | 'parent'; onCl
     setSending(false)
     if (!res.ok) { toast.error(data.error ?? 'Invite failed'); return }
     logAudit(supabase, { action: 'invite', entity: 'staff', summary: `Invited ${form.full_name.trim()} (${form.email.trim()}) as ${role}` })
-    toast.success(`Invite sent to ${form.email}`)
+    if (data.warning) { toast.error(data.warning, { duration: 8000 }) } else { toast.success(`Invite sent to ${form.email}`) }
     onSent()
   }
 
@@ -146,6 +146,7 @@ export default function StaffPage() {
   }
 
   async function demoteAdmin(id: string, name: string) {
+    if (id === viewerId) { toast.error('You can\'t remove your own admin access — ask another unrestricted admin'); return }
     if (!confirm(`Remove admin access for ${name}? They'll become a coach instead.`)) return
     const { error } = await supabase.from('profiles').update({ role: 'coach', permissions: null }).eq('id', id)
     if (error) { toast.error('Failed: ' + error.message); return }

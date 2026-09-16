@@ -76,7 +76,22 @@ export function usePWA() {
     }
   }
 
-  return { isOnline, isInstallable, installApp, queueOfflineAttendance, getOfflineQueue }
+  // Remove one record once it's been synced (or can never sync — e.g. its
+  // session was deleted). Without this, the foreground sync path
+  // (syncOfflineRecords in scan/page.tsx) never actually shrinks the queue —
+  // only the service worker's own background `sync` event handler did, which
+  // isn't supported on every browser (notably iOS Safari has no Background
+  // Sync API at all), so already-synced scans kept getting re-submitted.
+  async function removeOfflineAttendance(id: string) {
+    try {
+      const db = await openDB()
+      await removeFromQueue(db, id)
+    } catch (e) {
+      console.error('Failed to remove synced offline record', e)
+    }
+  }
+
+  return { isOnline, isInstallable, installApp, queueOfflineAttendance, getOfflineQueue, removeOfflineAttendance }
 }
 
 // ── IndexedDB helpers ─────────────────────────────────────────
@@ -104,5 +119,14 @@ function getAllFromQueue(db: IDBDatabase): Promise<any[]> {
     const req = tx.objectStore('queue').getAll()
     req.onsuccess = () => resolve(req.result)
     req.onerror = () => reject(req.error)
+  })
+}
+
+function removeFromQueue(db: IDBDatabase, id: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('queue', 'readwrite')
+    tx.objectStore('queue').delete(id)
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(tx.error)
   })
 }

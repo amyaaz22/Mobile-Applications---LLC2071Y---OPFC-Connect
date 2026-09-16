@@ -85,10 +85,13 @@ export default function PlayerDetailPage() {
     const { error } = await supabase.from('players').update({ enrollment_status: 'active' }).eq('id', params.id as string)
     if (error) { toast.error('Failed to convert: ' + error.message); setSaving(false); return }
 
-    const { data: fees } = await supabase.from('club_settings').select('value').eq('key', 'fees').single()
-    const entryFee = (fees?.value as any)?.entry
-    if (entryFee) {
-      await supabase.from('payments').insert({ player_id: params.id as string, type: 'entry', amount: entryFee, status: 'pending' })
+    const { data: existingEntry } = await supabase.from('payments').select('id').eq('player_id', params.id as string).eq('type', 'entry').limit(1).maybeSingle()
+    if (!existingEntry) {
+      const { data: fees } = await supabase.from('club_settings').select('value').eq('key', 'fees').single()
+      const entryFee = (fees?.value as any)?.entry
+      if (entryFee) {
+        await supabase.from('payments').insert({ player_id: params.id as string, type: 'entry', amount: entryFee, status: 'pending' })
+      }
     }
 
     logAudit(supabase, { action: 'update', entity: 'player', entity_id: params.id as string, summary: `Converted "${player.full_name}" from trial to full member` })
