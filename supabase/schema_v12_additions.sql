@@ -413,3 +413,31 @@ create policy "Staff/players-permitted accounts manage other profiles" on public
   public.has_area_permission('staff')
   or (public.has_area_permission('players') and role = 'parent')
 );
+
+-- ── ADVISOR HARDENING ───────────────────────────────────────────
+-- Findings from mcp__Supabase__get_advisors(security) after the above:
+--   1. Four pre-existing functions (unrelated to this migration) had a
+--      mutable search_path — cheap to close while already here.
+--   2. The new helper functions above are SECURITY DEFINER and, like
+--      every Postgres function, got an implicit EXECUTE grant to PUBLIC
+--      on creation — meaning anon (unauthenticated) could invoke them via
+--      PostgREST RPC. They have no legitimate anonymous caller (they're
+--      RLS-policy helpers only, and auth.uid() is NULL for anon anyway,
+--      so no real data exposure existed — but tightening this is free).
+--      Revoke from PUBLIC and grant back to authenticated only, which is
+--      the only role with any legitimate reason to call them (every RLS
+--      policy above that uses them runs as the querying user).
+alter function public.protect_profile_role() set search_path = public;
+alter function public.generate_player_code() set search_path = public;
+alter function public.update_updated_at() set search_path = public;
+alter function public.handle_new_user() set search_path = public;
+
+revoke execute on function public.has_area_permission(text) from public;
+revoke execute on function public.in_category_scope(text) from public;
+revoke execute on function public.in_player_category_scope(uuid) from public;
+revoke execute on function public.is_coach_or_admin() from public;
+
+grant execute on function public.has_area_permission(text) to authenticated;
+grant execute on function public.in_category_scope(text) to authenticated;
+grant execute on function public.in_player_category_scope(uuid) to authenticated;
+grant execute on function public.is_coach_or_admin() to authenticated;
