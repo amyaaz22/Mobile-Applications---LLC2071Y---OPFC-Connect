@@ -4,55 +4,9 @@ import { useEffect, useState } from 'react'
 import { usePathname } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { cn } from '@/lib/utils'
-import { hasPermission, PermissionArea } from '@/lib/permissions'
-import {
-  Users, CreditCard, CalendarDays, BarChart3, Megaphone,
-  Wallet, LogOut, QrCode, Home, ChevronRight, UserCircle,
-  Settings, TrendingUp, Trophy, Star, PiggyBank, Receipt,
-  HeartHandshake, Package, ShieldCheck, ClipboardList, Activity
-} from 'lucide-react'
-
-const coachNav: { href: string; label: string; icon: JSX.Element; area?: PermissionArea }[] = [
-  { href: '/coach', label: 'Dashboard', icon: <Home size={18}/> },
-  { href: '/coach/players', label: 'Players', icon: <Users size={18}/>, area: 'players' },
-  { href: '/coach/sessions', label: 'Sessions', icon: <CalendarDays size={18}/>, area: 'sessions' },
-  { href: '/coach/drills', label: 'Field Sheets', icon: <ClipboardList size={18}/>, area: 'field_sheets' },
-  { href: '/coach/attendance', label: 'Attendance', icon: <BarChart3 size={18}/>, area: 'attendance' },
-  { href: '/coach/analytics', label: 'Analytics', icon: <TrendingUp size={18}/>, area: 'analytics' },
-  { href: '/coach/leaderboard', label: 'Leaderboard', icon: <Trophy size={18}/>, area: 'leaderboard' },
-  { href: '/coach/points', label: 'Points', icon: <Star size={18}/>, area: 'points' },
-  { href: '/coach/announcements', label: 'Announcements', icon: <Megaphone size={18}/>, area: 'announcements' },
-  { href: '/coach/finance', label: 'Finance', icon: <PiggyBank size={18}/>, area: 'finance' },
-  { href: '/coach/payments', label: 'Payments', icon: <Wallet size={18}/>, area: 'payments' },
-  { href: '/coach/income', label: 'Income & Donations', icon: <HeartHandshake size={18}/>, area: 'income' },
-  { href: '/coach/expenses', label: 'Expenses', icon: <Receipt size={18}/>, area: 'expenses' },
-  { href: '/coach/inventory', label: 'Inventory', icon: <Package size={18}/>, area: 'inventory' },
-  { href: '/scan', label: 'QR Scanner', icon: <QrCode size={18}/> },
-  { href: '/coach/settings', label: 'Club Settings', icon: <Settings size={18}/>, area: 'settings' },
-  { href: '/coach/profile', label: 'Profile', icon: <UserCircle size={18}/> },
-]
-
-const adminOnlyNav: { href: string; label: string; icon: JSX.Element; area?: PermissionArea }[] = [
-  { href: '/coach/staff', label: 'Staff & Parents', icon: <ShieldCheck size={18}/>, area: 'staff' },
-  { href: '/coach/admin', label: 'Super Admin', icon: <Activity size={18}/>, area: 'system' },
-]
-
-const parentNav: { href: string; label: string; icon: JSX.Element; area?: PermissionArea }[] = [
-  { href: '/parent', label: 'Home', icon: <Home size={18}/> },
-  { href: '/parent/card', label: 'Player Card', icon: <CreditCard size={18}/> },
-  { href: '/parent/schedule', label: 'Schedule', icon: <CalendarDays size={18}/> },
-  { href: '/parent/attendance', label: 'Attendance', icon: <BarChart3 size={18}/> },
-  { href: '/parent/leaderboard', label: 'Leaderboard', icon: <Trophy size={18}/> },
-  { href: '/parent/statement', label: 'Statement of Account', icon: <Receipt size={18}/> },
-]
-
-const playerNav: { href: string; label: string; icon: JSX.Element; area?: PermissionArea }[] = [
-  { href: '/player', label: 'Home', icon: <Home size={18}/> },
-  { href: '/player/card', label: 'My Card', icon: <CreditCard size={18}/> },
-  { href: '/player/schedule', label: 'Schedule', icon: <CalendarDays size={18}/> },
-  { href: '/player/attendance', label: 'Attendance', icon: <BarChart3 size={18}/> },
-  { href: '/player/leaderboard', label: 'Leaderboard', icon: <Trophy size={18}/> },
-]
+import { hasPermission } from '@/lib/permissions'
+import { LogOut, ChevronRight } from 'lucide-react'
+import { coachNav, adminOnlyNav, parentNav, playerNav } from '@/lib/navItems'
 
 export default function Sidebar({ role, userName, permissions }: { role: string; userName: string; permissions?: string[] | null }) {
   const pathname = usePathname()
@@ -99,7 +53,7 @@ export default function Sidebar({ role, userName, permissions }: { role: string;
           return (
             <Link key={item.href} href={item.href}
               className={cn(isActive ? 'nav-item-active' : 'nav-item', 'text-sm')}>
-              {item.icon}
+              <item.icon size={18}/>
               <span>{item.label}</span>
               {isActive && <ChevronRight size={14} className="ml-auto opacity-50"/>}
             </Link>
