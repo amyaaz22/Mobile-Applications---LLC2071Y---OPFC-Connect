@@ -34,7 +34,7 @@ export default function ParentGuard({ children }: { children: React.ReactNode })
   return (
     <div className="min-h-screen">
       <Sidebar role="parent" userName={profile!.full_name}/>
-      <MobileNav role="parent"/>
+      <MobileNav role="parent" userName={profile!.full_name}/>
       <main className="md:ml-64 pb-20 md:pb-0 min-h-screen">{children}</main>
     </div>
   )

@@ -136,8 +136,8 @@ src/
     Leaderboard.tsx         — Shared leaderboard (used by coach/parent/player pages)
     ReceiptLink.tsx         — Opens an expense/income receipt via a short-lived signed URL (private `receipts` bucket)
     layout/
-      Sidebar.tsx           — Desktop sidebar nav, filters every item by hasPermission() (admin AND coach)
-      MobileNav.tsx         — Mobile bottom nav, same filtering
+      Sidebar.tsx           — Desktop sidebar nav (full list), filters every item by hasPermission() (admin AND coach)
+      MobileNav.tsx         — Mobile bottom nav: a short "quick access" bar (4 items, per src/lib/navItems.ts's *PrimaryHrefs) plus a "More" sheet — a full-screen grid of every permitted page, same filtering as Sidebar. Both Sidebar and MobileNav read from the same src/lib/navItems.ts nav lists so they can't drift apart again (MobileNav used to hardcode its own short list independent of Sidebar's, silently falling behind every time a page was added — by the time this was caught, most of the app, worst for an unrestricted admin with every area, was unreachable on mobile with no way to navigate to it at all)
       CoachGuard.tsx        — Auth guard for coach pages
       ParentGuard.tsx       — Auth guard for parent pages
       PlayerGuard.tsx       — Auth guard for player pages
@@ -155,6 +155,7 @@ src/
     supabase/
       client.ts             — Browser client (use everywhere)
       server.ts             — Server client (API routes only)
+    navItems.ts             — Single source of truth for every role's nav (coachNav/adminOnlyNav/parentNav/playerNav + coach/parent/playerPrimaryHrefs for MobileNav's quick-access bar) — shared by Sidebar.tsx and MobileNav.tsx so they can't drift apart
     permissions.ts          — PERMISSION_AREAS (16 areas) + hasPermission() for admin AND coach granular access (see RBAC notes)
     audit.ts                — logAudit() — fire-and-forget insert into audit_log, used across most mutating actions
   hooks/
@@ -210,6 +211,21 @@ supabase/
 ---
 
 ## Current Known Issues / TODO
+Fixed a real mobile-usability bug (reported directly by the club):
+`MobileNav.tsx` hardcoded its own short nav list (4-5 items) completely
+independent of `Sidebar.tsx`'s full list, and silently fell behind every
+time a new page was added over the course of this build — by the time it
+was caught, most of the app was unreachable on mobile with no way to
+navigate to it at all, worst for an unrestricted admin (17 coach pages +
+2 admin-only pages, only 5 reachable) but also true for parents/players
+(missing Leaderboard, and for parents, Statement of Account too). Fixed
+by extracting a shared `src/lib/navItems.ts` that both components now
+read from (so they can't drift apart again), and giving `MobileNav` a
+small quick-access bar plus a "More" sheet — a full-screen grid of every
+permitted page, verified with real Playwright screenshots at a 390×844
+mobile viewport for both an unrestricted admin and a parent account
+before shipping, not just read from the code.
+
 `assigned_categories` and `permissions` are now a real RLS boundary, not
 just UI convenience (schema v12 — see RBAC notes above for the full
 design and the read-broad/write-gated split that came out of tracing
