@@ -20,7 +20,7 @@ Built for the club's daily operations AND as a Year 3 BSc dissertation project.
 - Push to GitHub main → Vercel auto-deploys (takes ~1 min)
 - Always run `npm run build` locally before pushing to catch errors
 - Environment variables are set in Vercel dashboard (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY)
-- **Before this deploys correctly, run `schema_v3_additions.sql` through `schema_v12_additions.sql` in the Supabase SQL Editor**, in order (all additive — safe on the live DB, and all already applied on the live project as of this writing). v3 adds expenses/income/inventory tables, fixes a profile role-escalation hole, widens payments.type, converts point_rules/global_awards category columns to arrays. v4 frees players.position / announcements.tag / inventory_items.condition from their old CHECK constraints (Club Settings → Dropdown Lists now owns those lists), seeds the new dropdown-list keys, and adds profiles.permissions for granular admin access. v5 adds the field_sheets table (Field Sheets feature). v6 adds payments.reference (optional transaction ref), income.receipt_url, a private `receipts` storage bucket for expense/income attachments, and seeds categories/fees/club_info if missing. v7 adds the `audit_log` table (Super Admin panel's Activity Log). v8 adds income.donor_profile_id (optional link from a donation to the parent who made it, for the Statement of Account). v9 extends `handle_new_user` to also log new signups into `audit_log` (self-registration doesn't go through the app's own `logAudit()`). v10 adds `players.enrollment_status` ('trial'|'active') for the trial-session onboarding flow. v11 fixes two production bugs found in a code audit: `protect_profile_role` was keyed on `auth.uid()`, which is NULL for service-role requests — this silently reverted the role/permissions set by `/api/staff/invite` (a service-role route) back to the trigger's "no admin found, keep old value" branch, so every invited coach landed back on the default `parent` role until manually promoted again; the trigger now also allows `auth.role() = 'service_role'` through. It also adds the missing `income` RLS SELECT policy for `donor_profile_id = auth.uid()` — without it, a parent's Statement of Account silently showed Rs 0 in donations with no error, because the only existing `income` policy was the admin/coach "manage all" one. v12 promotes `assigned_categories`/`permissions` from a UI-level convenience to a real RLS boundary — see RBAC notes below for the design and its two SQL helper functions (`has_area_permission`, `in_category_scope`).
+- **Before this deploys correctly, run `schema_v3_additions.sql` through `schema_v13_additions.sql` in the Supabase SQL Editor**, in order (all additive — safe on the live DB, and all already applied on the live project as of this writing). v3 adds expenses/income/inventory tables, fixes a profile role-escalation hole, widens payments.type, converts point_rules/global_awards category columns to arrays. v4 frees players.position / announcements.tag / inventory_items.condition from their old CHECK constraints (Club Settings → Dropdown Lists now owns those lists), seeds the new dropdown-list keys, and adds profiles.permissions for granular admin access. v5 adds the field_sheets table (Field Sheets feature). v6 adds payments.reference (optional transaction ref), income.receipt_url, a private `receipts` storage bucket for expense/income attachments, and seeds categories/fees/club_info if missing. v7 adds the `audit_log` table (Super Admin panel's Activity Log). v8 adds income.donor_profile_id (optional link from a donation to the parent who made it, for the Statement of Account). v9 extends `handle_new_user` to also log new signups into `audit_log` (self-registration doesn't go through the app's own `logAudit()`). v10 adds `players.enrollment_status` ('trial'|'active') for the trial-session onboarding flow. v11 fixes two production bugs found in a code audit: `protect_profile_role` was keyed on `auth.uid()`, which is NULL for service-role requests — this silently reverted the role/permissions set by `/api/staff/invite` (a service-role route) back to the trigger's "no admin found, keep old value" branch, so every invited coach landed back on the default `parent` role until manually promoted again; the trigger now also allows `auth.role() = 'service_role'` through. It also adds the missing `income` RLS SELECT policy for `donor_profile_id = auth.uid()` — without it, a parent's Statement of Account silently showed Rs 0 in donations with no error, because the only existing `income` policy was the admin/coach "manage all" one. v12 promotes `assigned_categories`/`permissions` from a UI-level convenience to a real RLS boundary — see RBAC notes below for the design and its two SQL helper functions (`has_area_permission`, `in_category_scope`). v13 adds `player_applications`/`player_application_children` (public self-service registration — see "Player Registration" below) with public insert-only RLS and coach-read/coach-write policies gated by the new `registrations` permission area.
 - Coach/parent invites (Staff & Parents page) send real emails via Supabase Auth — needs an email provider configured in the Supabase project (default Supabase SMTP is rate-limited; for real usage swap in a custom SMTP provider under Auth settings)
 
 ---
@@ -69,7 +69,7 @@ Built for the club's daily operations AND as a Year 3 BSc dissertation project.
 **RBAC notes (relevant to the dissertation writeup):**
 - `profiles.role` is protected by a `BEFORE UPDATE` trigger (`protect_profile_role`, added in `schema_v3_additions.sql`) — a signed-in user cannot grant themselves a higher role by calling `supabase.from('profiles').update({ role: 'admin' })` directly; only an existing admin's update is honored. This closed a real self-escalation hole that existed in `schema_v2.sql`. The trigger also honors `auth.role() = 'service_role'` (added in `schema_v11_additions.sql`) — `auth.uid()` is NULL for requests made with the service-role key (no user JWT), so before v11 the trigger was silently reverting the role/permissions changes made by service-role API routes like `/api/staff/invite`. Any future server-side route that updates `role`/`permissions` with the service-role client relies on this.
 - `profiles.assigned_categories` (text[]) scopes *which categories' data* a coach sees — soft UI filtering via `useScopedCategories()` (`src/hooks/useScopedCategories.ts`, wired into Players, Sessions list/create, Attendance, Points, Announcements: filter chips/lists + narrowed "create" dropdowns, "All" hidden once scoped) **and**, since schema v12, a real RLS boundary. Null/empty = unrestricted (default for every account). A row is in scope if the viewer is unscoped, the row's own category is null/`'All'`, or it's literally in the viewer's `assigned_categories` — see `in_category_scope(row_category text)` / `in_player_category_scope(player_id uuid)` in `schema_v12_additions.sql`, which mirror `useScopedCategories()`'s `inScope()` exactly. Applied to `players`, `guardians` (via their player), `training_sessions`, `announcements` (SELECT + every write), and `attendance` (SELECT only — see below). **Deliberately left unscoped:** `point_rules`/`player_points`/`global_awards` (the leaderboard is club-wide by design — scoping it would break that feature for every viewer, not just the acting coach) and `player_stats` (only ever touched from the already-`players`-gated player detail page, no separate scoping surface exists in the UI for it).
-- `profiles.permissions` (text[], v4, greatly expanded in v7) is granular **feature/page access control** — *which areas of the app* an account can reach at all — and, since v7, applies to **both `admin` and `coach`** accounts (originally admin-only). See `src/lib/permissions.ts` for the full area list (`PERMISSION_AREAS`, 16 areas — one per page/module: players, sessions, attendance, field_sheets, analytics, leaderboard, points, announcements, finance, payments, income, expenses, inventory, settings, staff, system) and `hasPermission()`. Null/empty = unrestricted (the default — every existing account, admin or coach, keeps full access until deliberately narrowed). `staff` and `system` are hard-locked to `role==='admin'` in `hasPermission()` regardless of the permissions list — a coach can never be granted staff management or the Super Admin panel. Only an *unrestricted admin* can change anyone's `role` or `permissions` at all — including narrowing a coach — enforced by the same `protect_profile_role` trigger (extended in v4); a narrowed account can never grant itself (or anyone) more access. Enforced client-side via `usePermissionGuard(area)` at the top of every gated page, plus a matching filter in both `Sidebar.tsx` and `MobileNav.tsx` — **and, since schema v12, at the RLS layer too** via the SQL equivalent `has_area_permission(area text)` (keep the two in sync if `PERMISSION_AREAS` or its admin-only areas ever change).
+- `profiles.permissions` (text[], v4, greatly expanded in v7) is granular **feature/page access control** — *which areas of the app* an account can reach at all — and, since v7, applies to **both `admin` and `coach`** accounts (originally admin-only). See `src/lib/permissions.ts` for the full area list (`PERMISSION_AREAS`, 17 areas — one per page/module: players, registrations, sessions, attendance, field_sheets, analytics, leaderboard, points, announcements, finance, payments, income, expenses, inventory, settings, staff, system) and `hasPermission()`. Null/empty = unrestricted (the default — every existing account, admin or coach, keeps full access until deliberately narrowed). `staff` and `system` are hard-locked to `role==='admin'` in `hasPermission()` regardless of the permissions list — a coach can never be granted staff management or the Super Admin panel. Only an *unrestricted admin* can change anyone's `role` or `permissions` at all — including narrowing a coach — enforced by the same `protect_profile_role` trigger (extended in v4); a narrowed account can never grant itself (or anyone) more access. Enforced client-side via `usePermissionGuard(area)` at the top of every gated page, plus a matching filter in both `Sidebar.tsx` and `MobileNav.tsx` — **and, since schema v12, at the RLS layer too** via the SQL equivalent `has_area_permission(area text)` (keep the two in sync if `PERMISSION_AREAS` or its admin-only areas ever change).
   - **Self-lockout guard:** the Staff & Parents permission chips are disabled on the viewer's own row (`c.id === viewerId`), and `togglePermission()` itself refuses a self-target — an unrestricted admin narrowing *themselves* would otherwise instantly lock them out of Staff & Parents with no in-app recovery path (this happened once in production; recovered via direct Supabase access, see git history around the fix).
 - **RLS boundary design (schema v12):** mapped against every actual read/write call site in the app before writing a single policy (findings below), rather than gating tables symmetrically by area — a uniform "SELECT and write both require the area" rule would have broken real features. The rules that came out of that trace:
   - **Read stays broad**, gated only by `role in ('admin','coach')` (plus category scope where it applies) — never by a specific permission area. Several pages legitimately read across feature boundaries: Finance reads payments+income+expenses, Analytics reads attendance+players, Field Sheets reads players for its roster picker, Staff & Parents' Export Contacts reads guardians. `permissions` in this app is about *which pages/actions* an account can reach, not information-hiding between staff, so gating SELECT by area would only break things, not add security.
@@ -86,6 +86,7 @@ Built for the club's daily operations AND as a Year 3 BSc dissertation project.
 src/
   app/
     (auth)/login, register, forgot-password
+    apply/                 — Public, no-login player registration form (see "Player Registration" below) — replaces the club's old Google Form
     coach/
       page.tsx              — Dashboard
       players/page.tsx      — Player list, category filter, Excel export, "Download All Cards" (bulk PDF), "Trial" badge for trial players
@@ -93,6 +94,7 @@ src/
       players/[id]/edit/    — Edit player + guardian
       players/new/          — Register new player (3-step) — optional "trial session" checkbox skips the entry fee until converted
       players/import/       — Bulk Excel import, optional Photo URL column (direct image link or Google Drive share link — auto-converted, fetched, and re-uploaded like a normal photo upload)
+      registrations/         — Review queue (area 'registrations') for public /apply submissions — edit, approve (creates the real player+guardian, optional trial), or reject each child individually. See "Player Registration" below
       sessions/page.tsx     — Sessions list
       sessions/[id]/        — Session detail + attendance register
       sessions/new/         — Create session
@@ -138,6 +140,7 @@ src/
     layout/
       Sidebar.tsx           — Desktop sidebar nav (full list), filters every item by hasPermission() (admin AND coach)
       MobileNav.tsx         — Mobile bottom nav: a short "quick access" bar (4 items, per src/lib/navItems.ts's *PrimaryHrefs) plus a "More" sheet — a full-screen grid of every permitted page, same filtering as Sidebar. Both Sidebar and MobileNav read from the same src/lib/navItems.ts nav lists so they can't drift apart again (MobileNav used to hardcode its own short list independent of Sidebar's, silently falling behind every time a page was added — by the time this was caught, most of the app, worst for an unrestricted admin with every area, was unreachable on mobile with no way to navigate to it at all)
+      OnboardingGate.tsx    — Blocking install-app + enable-notifications step shown once per browser right after a user first reaches their dashboard (any role). See "Onboarding Gate" below
       CoachGuard.tsx        — Auth guard for coach pages
       ParentGuard.tsx       — Auth guard for parent pages
       PlayerGuard.tsx       — Auth guard for player pages
@@ -156,7 +159,7 @@ src/
       client.ts             — Browser client (use everywhere)
       server.ts             — Server client (API routes only)
     navItems.ts             — Single source of truth for every role's nav (coachNav/adminOnlyNav/parentNav/playerNav + coach/parent/playerPrimaryHrefs for MobileNav's quick-access bar) — shared by Sidebar.tsx and MobileNav.tsx so they can't drift apart
-    permissions.ts          — PERMISSION_AREAS (16 areas) + hasPermission() for admin AND coach granular access (see RBAC notes)
+    permissions.ts          — PERMISSION_AREAS (17 areas) + hasPermission() for admin AND coach granular access (see RBAC notes)
     audit.ts                — logAudit() — fire-and-forget insert into audit_log, used across most mutating actions
   hooks/
     usePWA.ts               — Online/offline + install prompt
@@ -182,6 +185,7 @@ supabase/
   schema_v10_additions.sql  — Additive migration: players.enrollment_status ('trial'|'active') for trial-session onboarding (run AFTER v9)
   schema_v11_additions.sql  — Additive migration: protect_profile_role trigger now also honors auth.role()='service_role' (fixes invite role reversion), adds the missing income RLS SELECT policy for donor_profile_id (run AFTER v10)
   schema_v12_additions.sql  — Additive migration: promotes assigned_categories/permissions from UI convenience to a real RLS boundary — has_area_permission()/in_category_scope()/in_player_category_scope() helpers, rewritten write-access policies across ~15 tables, search_path hardening on 4 pre-existing functions, and revokes the new helpers' implicit PUBLIC execute grant (run AFTER v11; see RBAC notes for the full design)
+  schema_v13_additions.sql  — Additive migration: player_applications/player_application_children tables for public self-service registration — public insert-only RLS (no SELECT for anon/authenticated), coach/admin read+write gated by the new `registrations` permission area (run AFTER v12; see "Player Registration" below)
 ```
 
 ---
@@ -207,6 +211,8 @@ supabase/
 | `fan_card` | Parent-customisable card data |
 | `field_sheets` | On-field drill worksheets. `columns` (jsonb `[{key,label}]`) + `player_ids` (uuid[], ordered) define the grid; `data` (jsonb, `{player_id: {col_key: value}}`) holds the filled-in cells — one row per sheet, not a normalized cell table |
 | `audit_log` | Append-only activity trail for the Super Admin panel. `actor_id`/`actor_name`/`actor_role`, `action` (create/update/delete/invite/promote/demote/award), `entity` (…/`account` for new signups, logged directly by the `handle_new_user` trigger since self-registration never goes through the app's `logAudit()`) + `entity_id`, human-readable `summary`, optional `metadata` jsonb. Admin-only read via RLS; any coach/admin (or the trigger, running as a security-definer function) can insert |
+| `player_applications` | Guardian info from a public `/apply` submission (guardian_name, relationship, phone_primary/secondary, email, address_line1/2). One row per household submission, covering however many children were added. RLS: public insert (`with check (true)`, no `TO` clause — anon and authenticated both), SELECT/write restricted to admin/coach — see "Player Registration" below |
+| `player_application_children` | One row per child on a `player_applications` submission (full_name, date_of_birth, school_grade, medical_conditions, takes_medication, `status` pending/approved/rejected, `resolved_player_id` once approved, `reviewed_by`/`reviewed_at`/`review_note`). Same public-insert RLS shape as `player_applications`; UPDATE/DELETE gated by the `registrations` permission area |
 
 ---
 
@@ -352,6 +358,8 @@ the chips (and `togglePermission()` itself) now refuse a self-target.
 - [ ] `/scan/live` (the no-login, link-based scanner) doesn't have the same offline localStorage cache fallback `/scan` now has — still needs live network to validate the token and load the roster
 - [ ] New-account visibility is in-app only (Super Admin panel's "New" badge + Activity Log) — a real push/email ping to the admin the instant someone registers needs the Brevo SMTP/API setup finished first, then either a Supabase Database Webhook or scheduled check calling a transactional email API (SMTP alone, once configured, only covers Supabase Auth's own templates — invite/confirm/reset — not custom "notify the admin" emails)
 - [ ] Deferred as low-severity/code-quality from the second audit (not fixed this round): `/scan` has no `CoachGuard` wrapper of its own (relies on being unreachable without a session in practice); a few small duplicated UI bits (spinner markup, tooltip patterns) could be extracted into shared components; some dashboard summary cards don't live-refresh after a mutation elsewhere on the page (a manual reload picks up the change).
+- [ ] `/apply` has no CAPTCHA or rate-limiting — same trust model as the old Google Form (anyone with the link can submit, vetted afterward by a coach). Revisit if spam submissions become a real problem.
+- [ ] The Onboarding Gate's notification step only primes the browser's `Notification.requestPermission()` — there's no actual push-sending backend yet (VAPID keys, a subscriptions table, a send pipeline). Folds into the existing Brevo/push TODO above once that infrastructure gets built.
 
 ---
 
@@ -370,6 +378,77 @@ Share URL: `/scan/live?session=SESSION_ID&token=SCAN_TOKEN`
 - Validates token server-side in `/api/scan/verify`
 - Auto-awards attendance points if "Attendance" rule exists
 - Use kiosk mode on Android for a dedicated scanner device
+
+---
+
+## Player Registration (Public Self-Service)
+Replaces the club's old Google Form. `/apply` is a public, unauthenticated,
+top-level route (not inside `CoachGuard`/`ParentGuard`/`PlayerGuard`) where a
+guardian fills their contact info **once** and adds one repeatable "child"
+card per player they're registering — instead of re-submitting the whole
+Google Form per child. Submission writes to `player_applications` (one row,
+the guardian info) + `player_application_children` (one row per child), via
+schema v13.
+- Submissions do **not** land directly in `players`/`guardians` — a coach
+  reviews, optionally edits, and approves or rejects each child individually
+  from `/coach/registrations` (area `registrations`, one of the 17
+  `PERMISSION_AREAS`).
+- **Approve** (`src/app/coach/registrations/page.tsx`) reuses the same logic
+  as manual player registration: creates the `players` row
+  (`enrollment_status` trial/active per a checkbox in the review UI, same as
+  `players/new`), creates the `guardians` row from the application's
+  guardian info, creates the `payments` entry-fee row unless trial (reading
+  `club_settings.fees.entry`, same convention as `players/new`/import), then
+  marks the child row `status='approved'` + `resolved_player_id` + reviewer/
+  timestamp, and logs it via `logAudit()`. **Reject** just sets
+  `status='rejected'` + an optional `review_note` and logs it.
+- **RLS / the RETURNING gotcha (read this before touching `/apply`'s insert
+  logic):** both tables' INSERT policy is public (`with check (true)`, no
+  `TO` clause) so an anonymous submitter can write, but neither has a SELECT
+  policy for `anon` — only `is_coach_or_admin()` can read. Postgres RLS
+  evaluates a table's **SELECT** policy to authorize what an
+  `INSERT ... RETURNING` clause returns, even though only `WITH CHECK`
+  governs whether the insert itself is allowed to happen. In practice this
+  means `supabase.from(...).insert(x).select().single()` (supabase-js sends
+  `Prefer: return=representation`, i.e. adds `RETURNING`) throws `permission
+  denied for function is_coach_or_admin` for an anonymous caller — even
+  though the insert would otherwise succeed. The fix, used in `/apply/page.tsx`:
+  generate the row's `id` client-side with `crypto.randomUUID()` and insert
+  with a **plain `.insert(x)`, never `.select()`**, so supabase-js sends
+  `Prefer: return=minimal` and no RETURNING/SELECT-policy check happens at
+  all. Keep this in mind for any other public-insert table added later.
+- No CAPTCHA or rate-limiting on `/apply` — same trust model the old Google
+  Form had (anyone with the link can submit; a coach vets everything before
+  it becomes a real player).
+
+---
+
+## Onboarding Gate
+Right after any user (admin/coach/parent/player) first reaches their
+dashboard post-login, `OnboardingGate.tsx` (wrapping the content in
+`CoachGuard`/`ParentGuard`/`PlayerGuard`) blocks the page behind a 2-step
+"Install the app" → "Enable notifications" wizard before letting them
+through to the real dashboard.
+- Tracked via a `localStorage` key (`opfc_onboarded_v1`) — the gate never
+  shows again on that browser once completed. It's skipped entirely if the
+  app is already running standalone (`display-mode: standalone` media query,
+  plus `navigator.standalone` on iOS).
+- **Install step:** on Android/Chrome, uses the existing `usePWA()` hook's
+  `beforeinstallprompt`-backed `installApp()` for a real install prompt. On
+  iOS (no install-prompt API exists at all) and any other non-installable
+  browser, shows manual instructions (Share → Add to Home Screen, or "use
+  your browser menu") with a self-attested "I've added it to my home
+  screen →" continue button — there is no way to verify or force an actual
+  iOS install from JS, so this step is honestly self-attested, not enforced.
+- **Notification step:** calls the browser `Notification.requestPermission()`
+  API. Both `granted` and `denied` are accepted as "answered" and let the
+  user continue — there's no way to force a user to click Allow on the
+  native permission dialog, and refusing to let a `denied` user through
+  would strand them with no recovery path.
+- This only primes the browser permission — there is no push-sending
+  backend yet (VAPID keys, subscription storage, an actual send pipeline);
+  see the TODO below, which already tracked push/email notifications as
+  future work before this round.
 
 ---
 

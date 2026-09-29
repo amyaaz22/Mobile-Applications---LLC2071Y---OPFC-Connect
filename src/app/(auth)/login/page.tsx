@@ -102,7 +102,12 @@ export default function LoginPage() {
           </div>
         </div>
 
-        <p className="text-center text-white/20 text-xs mt-6 italic">Omnis Tactus, Officium</p>
+        <p className="text-center text-sm mt-6">
+          <Link href="/apply" className="text-teal-400 hover:underline">
+            New player? Register here →
+          </Link>
+        </p>
+        <p className="text-center text-white/20 text-xs mt-3 italic">Omnis Tactus, Officium</p>
       </div>
     </div>
   )

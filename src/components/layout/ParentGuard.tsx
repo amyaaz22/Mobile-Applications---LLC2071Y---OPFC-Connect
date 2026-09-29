@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Sidebar from './Sidebar'
 import MobileNav from './MobileNav'
+import OnboardingGate from './OnboardingGate'
 
 export default function ParentGuard({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<{ full_name: string } | null>(null)
@@ -32,10 +33,12 @@ export default function ParentGuard({ children }: { children: React.ReactNode })
   )
 
   return (
-    <div className="min-h-screen">
-      <Sidebar role="parent" userName={profile!.full_name}/>
-      <MobileNav role="parent" userName={profile!.full_name}/>
-      <main className="md:ml-64 pb-20 md:pb-0 min-h-screen">{children}</main>
-    </div>
+    <OnboardingGate>
+      <div className="min-h-screen">
+        <Sidebar role="parent" userName={profile!.full_name}/>
+        <MobileNav role="parent" userName={profile!.full_name}/>
+        <main className="md:ml-64 pb-20 md:pb-0 min-h-screen">{children}</main>
+      </div>
+    </OnboardingGate>
   )
 }

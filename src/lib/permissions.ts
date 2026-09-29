@@ -12,6 +12,7 @@
 // architecture) — see CLAUDE.md RBAC notes for what that does and doesn't guarantee.
 export const PERMISSION_AREAS = [
   { key: 'players', label: 'Players' },
+  { key: 'registrations', label: 'Registrations' },
   { key: 'sessions', label: 'Sessions' },
   { key: 'attendance', label: 'Attendance' },
   { key: 'field_sheets', label: 'Field Sheets' },
