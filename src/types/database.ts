@@ -257,10 +257,41 @@ export interface AuditLogEntry {
   actor_name?: string
   actor_role?: string
   action: string                // 'create' | 'update' | 'delete' | 'invite' | 'promote' | 'demote' | 'award' | ... (free text)
-  entity: string                // 'player' | 'session' | 'payment' | 'expense' | 'income' | 'inventory_item' | 'announcement' | 'point_rule' | 'player_points' | 'global_award' | 'settings' | 'staff' | 'field_sheet' | 'account'
+  entity: string                // 'player' | 'session' | 'payment' | 'expense' | 'income' | 'inventory_item' | 'announcement' | 'point_rule' | 'player_points' | 'global_award' | 'settings' | 'staff' | 'field_sheet' | 'account' | 'player_application'
   entity_id?: string
   summary: string
   metadata?: Record<string, any>
+  created_at: string
+}
+
+// Public self-service registration (schema v13, submitted via /apply, no
+// login required). Reviewed from /coach/registrations (area
+// 'registrations') — approving a child creates real Player/Guardian rows.
+export interface PlayerApplication {
+  id: string
+  guardian_name: string
+  relationship: string
+  phone_primary: string
+  phone_secondary?: string
+  email?: string
+  address_line1?: string
+  address_line2?: string
+  submitted_at: string
+}
+
+export interface PlayerApplicationChild {
+  id: string
+  application_id: string
+  full_name: string
+  date_of_birth: string
+  school_grade?: string
+  medical_conditions?: string
+  takes_medication?: string
+  status: 'pending' | 'approved' | 'rejected'
+  reviewed_by?: string
+  reviewed_at?: string
+  review_note?: string
+  resolved_player_id?: string
   created_at: string
 }
 

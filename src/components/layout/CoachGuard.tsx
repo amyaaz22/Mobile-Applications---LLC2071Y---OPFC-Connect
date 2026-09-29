@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import Sidebar from './Sidebar'
 import MobileNav from './MobileNav'
+import OnboardingGate from './OnboardingGate'
 
 export default function CoachGuard({ children }: { children: React.ReactNode }) {
   const [profile, setProfile] = useState<{ role: string; full_name: string; permissions?: string[] | null } | null>(null)
@@ -43,10 +44,12 @@ export default function CoachGuard({ children }: { children: React.ReactNode }) 
   )
 
   return (
-    <div className="min-h-screen">
-      <Sidebar role={profile!.role} userName={profile!.full_name} permissions={profile!.permissions}/>
-      <MobileNav role={profile!.role} userName={profile!.full_name} permissions={profile!.permissions}/>
-      <main className="md:ml-64 pb-20 md:pb-0 min-h-screen">{children}</main>
-    </div>
+    <OnboardingGate>
+      <div className="min-h-screen">
+        <Sidebar role={profile!.role} userName={profile!.full_name} permissions={profile!.permissions}/>
+        <MobileNav role={profile!.role} userName={profile!.full_name} permissions={profile!.permissions}/>
+        <main className="md:ml-64 pb-20 md:pb-0 min-h-screen">{children}</main>
+      </div>
+    </OnboardingGate>
   )
 }

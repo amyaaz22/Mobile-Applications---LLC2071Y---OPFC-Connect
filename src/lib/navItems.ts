@@ -3,7 +3,7 @@ import {
   Users, CreditCard, CalendarDays, BarChart3, Megaphone,
   Wallet, QrCode, Home, UserCircle, Settings, TrendingUp,
   Trophy, Star, PiggyBank, Receipt, HeartHandshake, Package,
-  ShieldCheck, ClipboardList, Activity
+  ShieldCheck, ClipboardList, Activity, UserPlus
 } from 'lucide-react'
 import type { PermissionArea } from '@/lib/permissions'
 
@@ -24,6 +24,7 @@ export interface NavItem {
 export const coachNav: NavItem[] = [
   { href: '/coach', label: 'Dashboard', icon: Home },
   { href: '/coach/players', label: 'Players', icon: Users, area: 'players' },
+  { href: '/coach/registrations', label: 'Registrations', icon: UserPlus, area: 'registrations' },
   { href: '/coach/sessions', label: 'Sessions', icon: CalendarDays, area: 'sessions' },
   { href: '/coach/drills', label: 'Field Sheets', icon: ClipboardList, area: 'field_sheets' },
   { href: '/coach/attendance', label: 'Attendance', icon: BarChart3, area: 'attendance' },
