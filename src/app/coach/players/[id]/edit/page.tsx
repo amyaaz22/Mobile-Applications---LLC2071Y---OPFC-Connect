@@ -132,8 +132,8 @@ export default function EditPlayerPage() {
   async function toggleActive() {
     const newStatus = !player.is_active
     await supabase.from('players').update({ is_active: newStatus }).eq('id', params.id as string)
-    logAudit(supabase, { action: newStatus ? 'update' : 'delete', entity: 'player', entity_id: params.id as string, summary: `${newStatus ? 'Reactivated' : 'Deactivated'} player "${player.full_name}"` })
-    toast.success(newStatus ? 'Player reactivated' : 'Player deactivated')
+    logAudit(supabase, { action: newStatus ? 'update' : 'delete', entity: 'player', entity_id: params.id as string, summary: `${newStatus ? 'Unarchived' : 'Archived'} player "${player.full_name}"` })
+    toast.success(newStatus ? 'Player unarchived' : 'Player archived')
     router.push('/coach/players')
   }
 
@@ -287,9 +287,9 @@ export default function EditPlayerPage() {
           <h2 className="text-red-400 text-xs font-bold uppercase tracking-wider mb-3">Danger Zone</h2>
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-white text-sm font-medium">{player.is_active ? 'Deactivate Player' : 'Reactivate Player'}</p>
+              <p className="text-white text-sm font-medium">{player.is_active ? 'Archive Player' : 'Unarchive Player'}</p>
               <p className="text-white/30 text-xs mt-0.5">
-                {player.is_active ? 'Hide from active roster' : 'Restore to active roster'}
+                {player.is_active ? 'Hide from active roster — keeps all their records in case they rejoin later' : 'Restore to active roster'}
               </p>
             </div>
             <button type="button" onClick={toggleActive}
@@ -297,7 +297,7 @@ export default function EditPlayerPage() {
                 ${player.is_active
                   ? 'text-red-400 border-red-500/30 bg-red-500/10 hover:bg-red-500/20'
                   : 'text-green-400 border-green-500/30 bg-green-500/10 hover:bg-green-500/20'}`}>
-              {player.is_active ? 'Deactivate' : 'Reactivate'}
+              {player.is_active ? 'Archive' : 'Unarchive'}
             </button>
           </div>
         </div>

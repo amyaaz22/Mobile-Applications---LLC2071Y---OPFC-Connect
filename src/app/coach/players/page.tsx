@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { Player } from '@/types/database'
 import { categoryColor, getAge, formatDate } from '@/lib/utils'
-import { Plus, Search, Filter, Users, Download, FileStack, Pencil, Trash2, X } from 'lucide-react'
+import { Plus, Search, Filter, Users, Download, FileStack, Pencil, Archive, ArchiveRestore, X } from 'lucide-react'
 import PlayerCard from '@/components/cards/PlayerCard'
 import { PassCardFront, PassCardBack } from '@/components/cards/PassCard'
 import { toast } from 'react-hot-toast'
@@ -53,6 +53,7 @@ export default function PlayersPage() {
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('All')
   const [viewMode, setViewMode] = useState<'list' | 'cards'>('list')
+  const [showArchived, setShowArchived] = useState(false)
   const [categories, setCategories] = useState<string[]>(FALLBACK_CATEGORIES)
   const { scopedCategories, visibleCategories } = useScopedCategories(categories)
   const [exporting, setExporting] = useState(false)
@@ -62,7 +63,7 @@ export default function PlayersPage() {
   const [clubInfo, setClubInfo] = useState<{ logo_url?: string; name?: string }>({})
   const positions = useConfigList('positions', FALLBACK_POSITIONS)
 
-  // Mass/individual selection for bulk delete, export, and field updates.
+  // Mass/individual selection for bulk archive/unarchive, export, and field updates.
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [bulkBusy, setBulkBusy] = useState(false)
   const [showBulkUpdate, setShowBulkUpdate] = useState(false)
@@ -130,23 +131,32 @@ export default function PlayersPage() {
     })
   }
 
-  async function bulkDeactivate() {
+  // Archiving (is_active=false) is this app's only "delete" for players —
+  // it hides them from the active roster but keeps every payment,
+  // attendance, and stats record in case they rejoin later. Shared by both
+  // directions (Archive Selected / Unarchive Selected) since they're the
+  // same write with the opposite target value.
+  async function bulkSetActive(active: boolean) {
     const ids = Array.from(selected)
     if (!ids.length) return
     const names = players.filter(p => ids.includes(p.id)).map(p => p.full_name)
-    if (!confirm(`Deactivate ${ids.length} player(s)? They'll be hidden from the active roster, but their payments, attendance, and stats history are kept — same as deactivating one player from their profile.`)) return
+    const verb = active ? 'Unarchive' : 'Archive'
+    const confirmMsg = active
+      ? `Unarchive ${ids.length} player(s)? They'll return to the active roster.`
+      : `Archive ${ids.length} player(s)? They'll be hidden from the active roster, but their payments, attendance, and stats history are kept in case they rejoin later.`
+    if (!confirm(confirmMsg)) return
 
     setBulkBusy(true)
-    const { error } = await supabase.from('players').update({ is_active: false }).in('id', ids)
+    const { error } = await supabase.from('players').update({ is_active: active }).in('id', ids)
     setBulkBusy(false)
-    if (error) { toast.error('Bulk deactivate failed'); return }
+    if (error) { toast.error(`Bulk ${verb.toLowerCase()} failed`); return }
 
     logAudit(supabase, {
-      action: 'delete', entity: 'player',
-      summary: `Bulk-deactivated ${ids.length} player(s): ${names.slice(0, 5).join(', ')}${names.length > 5 ? ', …' : ''}`,
+      action: active ? 'update' : 'delete', entity: 'player',
+      summary: `Bulk-${verb.toLowerCase()}d ${ids.length} player(s): ${names.slice(0, 5).join(', ')}${names.length > 5 ? ', …' : ''}`,
       metadata: { player_ids: ids },
     })
-    toast.success(`${ids.length} player(s) deactivated`)
+    toast.success(`${ids.length} player(s) ${verb.toLowerCase()}d`)
     setSelected(new Set())
     fetchPlayers()
   }
@@ -227,7 +237,7 @@ export default function PlayersPage() {
     let query = supabase
       .from('players')
       .select(`*, guardian:guardians(*), stats:player_stats(*)`)
-      .eq('is_active', true)
+      .eq('is_active', !showArchived)
       .order('full_name')
 
     if (category !== 'All') query = query.eq('category', category)
@@ -242,7 +252,12 @@ export default function PlayersPage() {
     setLoading(false)
   }
 
-  useEffect(() => { fetchPlayers() }, [search, category, scopedCategories])
+  useEffect(() => { fetchPlayers() }, [search, category, scopedCategories, showArchived])
+
+  function toggleShowArchived() {
+    setSelected(new Set())
+    setShowArchived(a => !a)
+  }
 
   if (!permitted) return (
     <div className="flex items-center justify-center min-h-screen text-white/30">
@@ -256,7 +271,7 @@ export default function PlayersPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="page-title">Players</h1>
-          <p className="text-white/30 text-sm mt-1">{players.length} active players</p>
+          <p className="text-white/30 text-sm mt-1">{players.length} {showArchived ? 'archived' : 'active'} players</p>
         </div>
         <div className="flex gap-2">
           <button onClick={exportToExcel} disabled={exporting}
@@ -299,6 +314,10 @@ export default function PlayersPage() {
             </button>
           ))}
         </div>
+        <button onClick={toggleShowArchived}
+          className={`btn-secondary flex items-center gap-2 text-sm ${showArchived ? 'border-teal-400/30 text-teal-400' : ''}`}>
+          {showArchived ? <><Users size={14}/> Active</> : <><Archive size={14}/> Archived</>}
+        </button>
         <button onClick={() => setViewMode(v => v === 'list' ? 'cards' : 'list')}
           className="btn-secondary flex items-center gap-2 text-sm">
           {viewMode === 'list' ? '🃏 Cards' : '≡ List'}
@@ -316,11 +335,15 @@ export default function PlayersPage() {
           <button onClick={exportSelected} className="btn-secondary flex items-center gap-2 text-sm">
             <Download size={14}/> Export Selected
           </button>
-          <button onClick={() => setShowBulkUpdate(true)} className="btn-secondary flex items-center gap-2 text-sm">
-            <Pencil size={14}/> Bulk Update
-          </button>
-          <button onClick={bulkDeactivate} disabled={bulkBusy} className="btn-danger flex items-center gap-2 text-sm">
-            <Trash2 size={14}/> {bulkBusy ? 'Working…' : 'Deactivate Selected'}
+          {!showArchived && (
+            <button onClick={() => setShowBulkUpdate(true)} className="btn-secondary flex items-center gap-2 text-sm">
+              <Pencil size={14}/> Bulk Update
+            </button>
+          )}
+          <button onClick={() => bulkSetActive(showArchived)} disabled={bulkBusy}
+            className={`flex items-center gap-2 text-sm ${showArchived ? 'btn-secondary' : 'btn-danger'}`}>
+            {showArchived ? <ArchiveRestore size={14}/> : <Archive size={14}/>}
+            {bulkBusy ? 'Working…' : showArchived ? 'Unarchive Selected' : 'Archive Selected'}
           </button>
         </div>
       )}
@@ -350,8 +373,8 @@ export default function PlayersPage() {
           {players.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-white/30 gap-3">
               <Users size={40} className="opacity-30"/>
-              <p>No players found</p>
-              <Link href="/coach/players/new" className="btn-primary text-sm">Add First Player</Link>
+              <p>{showArchived ? 'No archived players' : 'No players found'}</p>
+              {!showArchived && <Link href="/coach/players/new" className="btn-primary text-sm">Add First Player</Link>}
             </div>
           ) : (
             <div className="overflow-x-auto">
