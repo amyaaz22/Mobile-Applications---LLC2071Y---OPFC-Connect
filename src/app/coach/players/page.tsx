@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { Player } from '@/types/database'
 import { categoryColor, getAge, formatDate } from '@/lib/utils'
-import { Plus, Search, Filter, Users, Download, FileStack } from 'lucide-react'
+import { Plus, Search, Filter, Users, Download, FileStack, Pencil, Trash2, X } from 'lucide-react'
 import PlayerCard from '@/components/cards/PlayerCard'
 import { PassCardFront, PassCardBack } from '@/components/cards/PassCard'
 import { toast } from 'react-hot-toast'
@@ -12,8 +12,38 @@ import * as XLSX from 'xlsx'
 import QRCode from 'qrcode'
 import { useScopedCategories } from '@/hooks/useScopedCategories'
 import { usePermissionGuard } from '@/hooks/usePermissionGuard'
+import { useConfigList } from '@/hooks/useConfigList'
+import { logAudit } from '@/lib/audit'
 
 const FALLBACK_CATEGORIES = ['U9', 'U13', 'First Team']
+const FALLBACK_POSITIONS = ['GK', 'DEF', 'MID', 'FWD']
+
+// Shared by the full export and the "Export Selected" bulk action so both
+// produce identical rows from the same player shape.
+function playerToExportRow(p: any) {
+  const g = Array.isArray(p.guardian) ? p.guardian[0] : p.guardian
+  const [y, m, d] = String(p.date_of_birth).split('-')
+  return {
+    'Full Name': p.full_name,
+    'Date of Birth (DD/MM/YYYY)': d && m && y ? `${d}/${m}/${y}` : '',
+    'Category': p.category,
+    'Position (GK / DEF / MID / FWD)': p.position,
+    'Nationality': p.nationality ?? '',
+    'School / Grade': p.school ?? '',
+    'Address': p.address ?? '',
+    'Medical Notes': p.medical_notes ?? '',
+    'Guardian Full Name': g?.full_name ?? '',
+    'Guardian Relationship': g?.relationship ?? '',
+    'Guardian Phone (WhatsApp)': g?.phone_primary ?? '',
+    'Guardian Email': g?.email ?? '',
+  }
+}
+
+const EXPORT_COLUMN_WIDTHS = [
+  { wch: 24 }, { wch: 22 }, { wch: 16 }, { wch: 28 },
+  { wch: 14 }, { wch: 30 }, { wch: 28 }, { wch: 22 },
+  { wch: 22 }, { wch: 22 }, { wch: 22 }, { wch: 24 },
+]
 
 export default function PlayersPage() {
   const supabase = createClient()
@@ -30,6 +60,14 @@ export default function PlayersPage() {
   const [renderPlayer, setRenderPlayer] = useState<any>(null)
   const [renderQrUrl, setRenderQrUrl] = useState('')
   const [clubInfo, setClubInfo] = useState<{ logo_url?: string; name?: string }>({})
+  const positions = useConfigList('positions', FALLBACK_POSITIONS)
+
+  // Mass/individual selection for bulk delete, export, and field updates.
+  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [bulkBusy, setBulkBusy] = useState(false)
+  const [showBulkUpdate, setShowBulkUpdate] = useState(false)
+  const [bulkField, setBulkField] = useState<'category' | 'position'>('category')
+  const [bulkValue, setBulkValue] = useState('')
 
   useEffect(() => {
     supabase.from('club_settings').select('value').eq('key', 'categories').single()
@@ -48,38 +86,90 @@ export default function PlayersPage() {
         .order('full_name')
       if (error || !data) { toast.error('Export failed'); return }
 
-      const rows = data.map((p: any) => {
-        const g = Array.isArray(p.guardian) ? p.guardian[0] : p.guardian
-        const [y, m, d] = String(p.date_of_birth).split('-')
-        return {
-          'Full Name': p.full_name,
-          'Date of Birth (DD/MM/YYYY)': d && m && y ? `${d}/${m}/${y}` : '',
-          'Category': p.category,
-          'Position (GK / DEF / MID / FWD)': p.position,
-          'Nationality': p.nationality ?? '',
-          'School / Grade': p.school ?? '',
-          'Address': p.address ?? '',
-          'Medical Notes': p.medical_notes ?? '',
-          'Guardian Full Name': g?.full_name ?? '',
-          'Guardian Relationship': g?.relationship ?? '',
-          'Guardian Phone (WhatsApp)': g?.phone_primary ?? '',
-          'Guardian Email': g?.email ?? '',
-        }
-      })
-
+      const rows = data.map(playerToExportRow)
       const wb = XLSX.utils.book_new()
       const ws = XLSX.utils.json_to_sheet(rows)
-      ws['!cols'] = [
-        { wch: 24 }, { wch: 22 }, { wch: 16 }, { wch: 28 },
-        { wch: 14 }, { wch: 30 }, { wch: 28 }, { wch: 22 },
-        { wch: 22 }, { wch: 22 }, { wch: 22 }, { wch: 24 },
-      ]
+      ws['!cols'] = EXPORT_COLUMN_WIDTHS
       XLSX.utils.book_append_sheet(wb, ws, 'Players')
       XLSX.writeFile(wb, `OPFC_Players_${new Date().toISOString().split('T')[0]}.xlsx`)
       toast.success(`${rows.length} players exported`)
     } finally {
       setExporting(false)
     }
+  }
+
+  // Exports exactly the currently-selected rows, from already-loaded data —
+  // no need to re-fetch since the table already has guardian/category/etc.
+  function exportSelected() {
+    const rows = players.filter(p => selected.has(p.id)).map(playerToExportRow)
+    if (!rows.length) return
+    const wb = XLSX.utils.book_new()
+    const ws = XLSX.utils.json_to_sheet(rows)
+    ws['!cols'] = EXPORT_COLUMN_WIDTHS
+    XLSX.utils.book_append_sheet(wb, ws, 'Players')
+    XLSX.writeFile(wb, `OPFC_Players_Selected_${new Date().toISOString().split('T')[0]}.xlsx`)
+    toast.success(`${rows.length} selected player(s) exported`)
+  }
+
+  function toggleSelect(id: string) {
+    setSelected(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll() {
+    const visibleIds = players.map(p => p.id)
+    const allSelected = visibleIds.length > 0 && visibleIds.every(id => selected.has(id))
+    setSelected(prev => {
+      const next = new Set(prev)
+      visibleIds.forEach(id => allSelected ? next.delete(id) : next.add(id))
+      return next
+    })
+  }
+
+  async function bulkDeactivate() {
+    const ids = Array.from(selected)
+    if (!ids.length) return
+    const names = players.filter(p => ids.includes(p.id)).map(p => p.full_name)
+    if (!confirm(`Deactivate ${ids.length} player(s)? They'll be hidden from the active roster, but their payments, attendance, and stats history are kept — same as deactivating one player from their profile.`)) return
+
+    setBulkBusy(true)
+    const { error } = await supabase.from('players').update({ is_active: false }).in('id', ids)
+    setBulkBusy(false)
+    if (error) { toast.error('Bulk deactivate failed'); return }
+
+    logAudit(supabase, {
+      action: 'delete', entity: 'player',
+      summary: `Bulk-deactivated ${ids.length} player(s): ${names.slice(0, 5).join(', ')}${names.length > 5 ? ', …' : ''}`,
+      metadata: { player_ids: ids },
+    })
+    toast.success(`${ids.length} player(s) deactivated`)
+    setSelected(new Set())
+    fetchPlayers()
+  }
+
+  async function applyBulkUpdate() {
+    const ids = Array.from(selected)
+    if (!ids.length || !bulkValue) return
+
+    setBulkBusy(true)
+    const { error } = await supabase.from('players').update({ [bulkField]: bulkValue }).in('id', ids)
+    setBulkBusy(false)
+    if (error) { toast.error('Bulk update failed'); return }
+
+    logAudit(supabase, {
+      action: 'update', entity: 'player',
+      summary: `Bulk-updated ${bulkField} to "${bulkValue}" for ${ids.length} player(s)`,
+      metadata: { player_ids: ids, field: bulkField, value: bulkValue },
+    })
+    toast.success(`${bulkField === 'category' ? 'Category' : 'Position'} updated for ${ids.length} player(s)`)
+    setSelected(new Set())
+    setShowBulkUpdate(false)
+    setBulkValue('')
+    fetchPlayers()
   }
 
   async function downloadAllCards() {
@@ -132,28 +222,27 @@ export default function PlayersPage() {
     setBulkProgress(null)
   }
 
-  useEffect(() => {
-    async function fetchPlayers() {
-      setLoading(true)
-      let query = supabase
-        .from('players')
-        .select(`*, guardian:guardians(*), stats:player_stats(*)`)
-        .eq('is_active', true)
-        .order('full_name')
+  async function fetchPlayers() {
+    setLoading(true)
+    let query = supabase
+      .from('players')
+      .select(`*, guardian:guardians(*), stats:player_stats(*)`)
+      .eq('is_active', true)
+      .order('full_name')
 
-      if (category !== 'All') query = query.eq('category', category)
-      else if (scopedCategories.length) query = query.in('category', scopedCategories)
-      if (search) query = query.ilike('full_name', `%${search}%`)
+    if (category !== 'All') query = query.eq('category', category)
+    else if (scopedCategories.length) query = query.in('category', scopedCategories)
+    if (search) query = query.ilike('full_name', `%${search}%`)
 
-      const { data } = await query
-      setPlayers(data?.map(p => ({
-        ...p,
-        stats: p.stats?.sort((a: any, b: any) => b.assessed_month.localeCompare(a.assessed_month))[0] ?? null
-      })) ?? [])
-      setLoading(false)
-    }
-    fetchPlayers()
-  }, [search, category, scopedCategories])
+    const { data } = await query
+    setPlayers(data?.map(p => ({
+      ...p,
+      stats: p.stats?.sort((a: any, b: any) => b.assessed_month.localeCompare(a.assessed_month))[0] ?? null
+    })) ?? [])
+    setLoading(false)
+  }
+
+  useEffect(() => { fetchPlayers() }, [search, category, scopedCategories])
 
   if (!permitted) return (
     <div className="flex items-center justify-center min-h-screen text-white/30">
@@ -216,6 +305,26 @@ export default function PlayersPage() {
         </button>
       </div>
 
+      {/* Bulk action bar — appears once at least one player is selected */}
+      {selected.size > 0 && (
+        <div className="card p-3 mb-6 flex flex-wrap items-center gap-3 border border-teal-400/20 bg-teal-400/5">
+          <span className="text-white text-sm font-semibold">{selected.size} selected</span>
+          <button onClick={() => setSelected(new Set())} className="text-white/40 text-xs hover:text-white flex items-center gap-1">
+            <X size={12}/> Clear
+          </button>
+          <div className="flex-1"/>
+          <button onClick={exportSelected} className="btn-secondary flex items-center gap-2 text-sm">
+            <Download size={14}/> Export Selected
+          </button>
+          <button onClick={() => setShowBulkUpdate(true)} className="btn-secondary flex items-center gap-2 text-sm">
+            <Pencil size={14}/> Bulk Update
+          </button>
+          <button onClick={bulkDeactivate} disabled={bulkBusy} className="btn-danger flex items-center gap-2 text-sm">
+            <Trash2 size={14}/> {bulkBusy ? 'Working…' : 'Deactivate Selected'}
+          </button>
+        </div>
+      )}
+
       {/* Loading */}
       {loading && (
         <div className="flex items-center justify-center py-16 text-white/30">
@@ -249,6 +358,12 @@ export default function PlayersPage() {
               <table className="w-full">
                 <thead>
                   <tr className="border-b border-white/5">
+                    <th className="px-4 py-3 w-10">
+                      <input type="checkbox"
+                        checked={players.length > 0 && players.every(p => selected.has(p.id))}
+                        onChange={toggleSelectAll}
+                        className="w-4 h-4 accent-teal-400 cursor-pointer"/>
+                    </th>
                     {['Player', 'Category', 'Position', 'OVR', 'Age', 'Guardian', 'Actions'].map(h => (
                       <th key={h} className="text-left px-4 py-3 text-xs font-bold text-white/30 uppercase tracking-wider">{h}</th>
                     ))}
@@ -256,7 +371,13 @@ export default function PlayersPage() {
                 </thead>
                 <tbody>
                   {players.map((p, i) => (
-                    <tr key={p.id} className={`border-b border-white/5 hover:bg-white/3 transition-colors ${i % 2 === 0 ? '' : 'bg-white/2'}`}>
+                    <tr key={p.id} className={`border-b border-white/5 hover:bg-white/3 transition-colors ${i % 2 === 0 ? '' : 'bg-white/2'} ${selected.has(p.id) ? 'bg-teal-400/5' : ''}`}>
+                      <td className="px-4 py-3">
+                        <input type="checkbox"
+                          checked={selected.has(p.id)}
+                          onChange={() => toggleSelect(p.id)}
+                          className="w-4 h-4 accent-teal-400 cursor-pointer"/>
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-3">
                           <div className="w-9 h-9 rounded-full bg-teal-400/10 flex items-center justify-center flex-shrink-0">
@@ -311,6 +432,36 @@ export default function PlayersPage() {
           </>
         )}
       </div>
+
+      {/* Bulk field update modal */}
+      {showBulkUpdate && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="card p-6 w-full max-w-sm">
+            <h2 className="text-white font-bold text-lg mb-4">Bulk Update {selected.size} Player(s)</h2>
+            <label className="label">Field</label>
+            <select className="input mb-3" value={bulkField}
+              onChange={e => { setBulkField(e.target.value as 'category' | 'position'); setBulkValue('') }}>
+              <option value="category">Category</option>
+              <option value="position">Position</option>
+            </select>
+            <label className="label">New value</label>
+            <select className="input mb-5" value={bulkValue} onChange={e => setBulkValue(e.target.value)}>
+              <option value="">Select…</option>
+              {(bulkField === 'category' ? categories : positions).map(v => (
+                <option key={v} value={v}>{v}</option>
+              ))}
+            </select>
+            <div className="flex gap-2">
+              <button onClick={applyBulkUpdate} disabled={!bulkValue || bulkBusy} className="btn-primary flex-1 text-sm">
+                {bulkBusy ? 'Updating…' : 'Apply'}
+              </button>
+              <button onClick={() => { setShowBulkUpdate(false); setBulkValue('') }} className="btn-secondary flex-1 text-sm">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Bulk download progress */}
       {bulkProgress && (
