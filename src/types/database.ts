@@ -295,6 +295,45 @@ export interface PlayerApplicationChild {
   created_at: string
 }
 
+// Drill Library (schema v14) — phase 1: manual add/edit/delete, browse/filter.
+export interface Drill {
+  id: string
+  name: string
+  categories: string[]              // same convention as point_rules.category
+  tags: string[]
+  game_format?: string              // Dropdown-List key `drill_game_formats`
+  team_setup?: Record<string, any>  // reserved for the extraction phase, not surfaced in phase-1 UI
+  min_players?: number
+  max_players?: number
+  duration_minutes?: number
+  equipment: string[]
+  field_dimensions?: string
+  description?: string
+  setup_instructions?: string
+  coaching_points?: string
+  progressions?: string[]
+  source_material_id?: string
+  source_page_range?: string
+  status: 'draft' | 'published'
+  created_by?: string
+  created_at: string
+  updated_at: string
+}
+
+// Assigns a Drill Library entry to a specific TrainingSession, in order —
+// the "session plan" a coach builds before running it (schema v15).
+export interface SessionDrill {
+  id: string
+  session_id: string
+  drill_id: string
+  sort_order: number
+  notes?: string
+  added_by?: string
+  created_at: string
+  // relation
+  drill?: Drill
+}
+
 // View types (with joins)
 export interface PlayerWithDetails extends Omit<Player, 'stats'> {
   guardian: Guardian
