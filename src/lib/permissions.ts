@@ -16,6 +16,7 @@ export const PERMISSION_AREAS = [
   { key: 'sessions', label: 'Sessions' },
   { key: 'attendance', label: 'Attendance' },
   { key: 'field_sheets', label: 'Field Sheets' },
+  { key: 'drill_library', label: 'Drill Library' },
   { key: 'analytics', label: 'Analytics' },
   { key: 'leaderboard', label: 'Leaderboard' },
   { key: 'points', label: 'Points System' },

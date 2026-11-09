@@ -20,7 +20,7 @@ Built for the club's daily operations AND as a Year 3 BSc dissertation project.
 - Push to GitHub main → Vercel auto-deploys (takes ~1 min)
 - Always run `npm run build` locally before pushing to catch errors
 - Environment variables are set in Vercel dashboard (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY)
-- **Before this deploys correctly, run `schema_v3_additions.sql` through `schema_v13_additions.sql` in the Supabase SQL Editor**, in order (all additive — safe on the live DB, and all already applied on the live project as of this writing). v3 adds expenses/income/inventory tables, fixes a profile role-escalation hole, widens payments.type, converts point_rules/global_awards category columns to arrays. v4 frees players.position / announcements.tag / inventory_items.condition from their old CHECK constraints (Club Settings → Dropdown Lists now owns those lists), seeds the new dropdown-list keys, and adds profiles.permissions for granular admin access. v5 adds the field_sheets table (Field Sheets feature). v6 adds payments.reference (optional transaction ref), income.receipt_url, a private `receipts` storage bucket for expense/income attachments, and seeds categories/fees/club_info if missing. v7 adds the `audit_log` table (Super Admin panel's Activity Log). v8 adds income.donor_profile_id (optional link from a donation to the parent who made it, for the Statement of Account). v9 extends `handle_new_user` to also log new signups into `audit_log` (self-registration doesn't go through the app's own `logAudit()`). v10 adds `players.enrollment_status` ('trial'|'active') for the trial-session onboarding flow. v11 fixes two production bugs found in a code audit: `protect_profile_role` was keyed on `auth.uid()`, which is NULL for service-role requests — this silently reverted the role/permissions set by `/api/staff/invite` (a service-role route) back to the trigger's "no admin found, keep old value" branch, so every invited coach landed back on the default `parent` role until manually promoted again; the trigger now also allows `auth.role() = 'service_role'` through. It also adds the missing `income` RLS SELECT policy for `donor_profile_id = auth.uid()` — without it, a parent's Statement of Account silently showed Rs 0 in donations with no error, because the only existing `income` policy was the admin/coach "manage all" one. v12 promotes `assigned_categories`/`permissions` from a UI-level convenience to a real RLS boundary — see RBAC notes below for the design and its two SQL helper functions (`has_area_permission`, `in_category_scope`). v13 adds `player_applications`/`player_application_children` (public self-service registration — see "Player Registration" below) with public insert-only RLS and coach-read/coach-write policies gated by the new `registrations` permission area.
+- **Before this deploys correctly, run `schema_v3_additions.sql` through `schema_v15_additions.sql` in the Supabase SQL Editor**, in order (all additive — safe on the live DB, and all already applied on the live project as of this writing). v3 adds expenses/income/inventory tables, fixes a profile role-escalation hole, widens payments.type, converts point_rules/global_awards category columns to arrays. v4 frees players.position / announcements.tag / inventory_items.condition from their old CHECK constraints (Club Settings → Dropdown Lists now owns those lists), seeds the new dropdown-list keys, and adds profiles.permissions for granular admin access. v5 adds the field_sheets table (Field Sheets feature). v6 adds payments.reference (optional transaction ref), income.receipt_url, a private `receipts` storage bucket for expense/income attachments, and seeds categories/fees/club_info if missing. v7 adds the `audit_log` table (Super Admin panel's Activity Log). v8 adds income.donor_profile_id (optional link from a donation to the parent who made it, for the Statement of Account). v9 extends `handle_new_user` to also log new signups into `audit_log` (self-registration doesn't go through the app's own `logAudit()`). v10 adds `players.enrollment_status` ('trial'|'active') for the trial-session onboarding flow. v11 fixes two production bugs found in a code audit: `protect_profile_role` was keyed on `auth.uid()`, which is NULL for service-role requests — this silently reverted the role/permissions set by `/api/staff/invite` (a service-role route) back to the trigger's "no admin found, keep old value" branch, so every invited coach landed back on the default `parent` role until manually promoted again; the trigger now also allows `auth.role() = 'service_role'` through. It also adds the missing `income` RLS SELECT policy for `donor_profile_id = auth.uid()` — without it, a parent's Statement of Account silently showed Rs 0 in donations with no error, because the only existing `income` policy was the admin/coach "manage all" one. v12 promotes `assigned_categories`/`permissions` from a UI-level convenience to a real RLS boundary — see RBAC notes below for the design and its two SQL helper functions (`has_area_permission`, `in_category_scope`). v13 adds `player_applications`/`player_application_children` (public self-service registration — see "Player Registration" below) with public insert-only RLS and coach-read/coach-write policies gated by the new `registrations` permission area. v14 adds the Drill Library (phase 1 — see "Drill Library" below): `drills`, plus `training_materials`/`material_chunks` for a future AI-assisted extraction phase, all gated by the new `drill_library` permission area; read stays broad for any coach/admin, writes require the area. v15 adds `session_drills` (Session Plan — assigning Drill Library entries to a specific training session, in order), gated by the `sessions` permission area, not `drill_library`, since assigning is part of session planning done from the session detail page.
 - Coach/parent invites (Staff & Parents page) send real emails via Supabase Auth — needs an email provider configured in the Supabase project (default Supabase SMTP is rate-limited; for real usage swap in a custom SMTP provider under Auth settings)
 
 ---
@@ -69,7 +69,7 @@ Built for the club's daily operations AND as a Year 3 BSc dissertation project.
 **RBAC notes (relevant to the dissertation writeup):**
 - `profiles.role` is protected by a `BEFORE UPDATE` trigger (`protect_profile_role`, added in `schema_v3_additions.sql`) — a signed-in user cannot grant themselves a higher role by calling `supabase.from('profiles').update({ role: 'admin' })` directly; only an existing admin's update is honored. This closed a real self-escalation hole that existed in `schema_v2.sql`. The trigger also honors `auth.role() = 'service_role'` (added in `schema_v11_additions.sql`) — `auth.uid()` is NULL for requests made with the service-role key (no user JWT), so before v11 the trigger was silently reverting the role/permissions changes made by service-role API routes like `/api/staff/invite`. Any future server-side route that updates `role`/`permissions` with the service-role client relies on this.
 - `profiles.assigned_categories` (text[]) scopes *which categories' data* a coach sees — soft UI filtering via `useScopedCategories()` (`src/hooks/useScopedCategories.ts`, wired into Players, Sessions list/create, Attendance, Points, Announcements: filter chips/lists + narrowed "create" dropdowns, "All" hidden once scoped) **and**, since schema v12, a real RLS boundary. Null/empty = unrestricted (default for every account). A row is in scope if the viewer is unscoped, the row's own category is null/`'All'`, or it's literally in the viewer's `assigned_categories` — see `in_category_scope(row_category text)` / `in_player_category_scope(player_id uuid)` in `schema_v12_additions.sql`, which mirror `useScopedCategories()`'s `inScope()` exactly. Applied to `players`, `guardians` (via their player), `training_sessions`, `announcements` (SELECT + every write), and `attendance` (SELECT only — see below). **Deliberately left unscoped:** `point_rules`/`player_points`/`global_awards` (the leaderboard is club-wide by design — scoping it would break that feature for every viewer, not just the acting coach) and `player_stats` (only ever touched from the already-`players`-gated player detail page, no separate scoping surface exists in the UI for it).
-- `profiles.permissions` (text[], v4, greatly expanded in v7) is granular **feature/page access control** — *which areas of the app* an account can reach at all — and, since v7, applies to **both `admin` and `coach`** accounts (originally admin-only). See `src/lib/permissions.ts` for the full area list (`PERMISSION_AREAS`, 17 areas — one per page/module: players, registrations, sessions, attendance, field_sheets, analytics, leaderboard, points, announcements, finance, payments, income, expenses, inventory, settings, staff, system) and `hasPermission()`. Null/empty = unrestricted (the default — every existing account, admin or coach, keeps full access until deliberately narrowed). `staff` and `system` are hard-locked to `role==='admin'` in `hasPermission()` regardless of the permissions list — a coach can never be granted staff management or the Super Admin panel. Only an *unrestricted admin* can change anyone's `role` or `permissions` at all — including narrowing a coach — enforced by the same `protect_profile_role` trigger (extended in v4); a narrowed account can never grant itself (or anyone) more access. Enforced client-side via `usePermissionGuard(area)` at the top of every gated page, plus a matching filter in both `Sidebar.tsx` and `MobileNav.tsx` — **and, since schema v12, at the RLS layer too** via the SQL equivalent `has_area_permission(area text)` (keep the two in sync if `PERMISSION_AREAS` or its admin-only areas ever change).
+- `profiles.permissions` (text[], v4, greatly expanded in v7) is granular **feature/page access control** — *which areas of the app* an account can reach at all — and, since v7, applies to **both `admin` and `coach`** accounts (originally admin-only). See `src/lib/permissions.ts` for the full area list (`PERMISSION_AREAS`, 18 areas — one per page/module: players, registrations, sessions, attendance, field_sheets, drill_library, analytics, leaderboard, points, announcements, finance, payments, income, expenses, inventory, settings, staff, system) and `hasPermission()`. Null/empty = unrestricted (the default — every existing account, admin or coach, keeps full access until deliberately narrowed). `staff` and `system` are hard-locked to `role==='admin'` in `hasPermission()` regardless of the permissions list — a coach can never be granted staff management or the Super Admin panel. Only an *unrestricted admin* can change anyone's `role` or `permissions` at all — including narrowing a coach — enforced by the same `protect_profile_role` trigger (extended in v4); a narrowed account can never grant itself (or anyone) more access. Enforced client-side via `usePermissionGuard(area)` at the top of every gated page, plus a matching filter in both `Sidebar.tsx` and `MobileNav.tsx` — **and, since schema v12, at the RLS layer too** via the SQL equivalent `has_area_permission(area text)` (keep the two in sync if `PERMISSION_AREAS` or its admin-only areas ever change).
   - **Self-lockout guard:** the Staff & Parents permission chips are disabled on the viewer's own row (`c.id === viewerId`), and `togglePermission()` itself refuses a self-target — an unrestricted admin narrowing *themselves* would otherwise instantly lock them out of Staff & Parents with no in-app recovery path (this happened once in production; recovered via direct Supabase access, see git history around the fix).
 - **RLS boundary design (schema v12):** mapped against every actual read/write call site in the app before writing a single policy (findings below), rather than gating tables symmetrically by area — a uniform "SELECT and write both require the area" rule would have broken real features. The rules that came out of that trace:
   - **Read stays broad**, gated only by `role in ('admin','coach')` (plus category scope where it applies) — never by a specific permission area. Several pages legitimately read across feature boundaries: Finance reads payments+income+expenses, Analytics reads attendance+players, Field Sheets reads players for its roster picker, Staff & Parents' Export Contacts reads guardians. `permissions` in this app is about *which pages/actions* an account can reach, not information-hiding between staff, so gating SELECT by area would only break things, not add security.
@@ -96,9 +96,10 @@ src/
       players/import/       — Bulk Excel import, optional Photo URL column (direct image link or Google Drive share link — auto-converted, fetched, and re-uploaded like a normal photo upload)
       registrations/         — Review queue (area 'registrations') for public /apply submissions — edit, approve (creates the real player+guardian, optional trial), or reject each child individually. See "Player Registration" below
       sessions/page.tsx     — Sessions list
-      sessions/[id]/        — Session detail + attendance register
+      sessions/[id]/        — Session detail + Session Plan (assign/reorder drills from the Drill Library) + attendance register
       sessions/new/         — Create session
       drills/               — Field Sheets: drill worksheets (roster + custom columns), fillable in-app, Excel + printable PDF export
+      drill-library/        — Drill Library (phase 1, area 'drill_library'): shared, searchable drill database — browse/filter, add/edit/delete. See "Drill Library" below for the planned AI-assisted extraction phase
       attendance/           — Attendance overview
       analytics/            — Analytics dashboard (charts)
       leaderboard/          — Points leaderboard
@@ -159,7 +160,7 @@ src/
       client.ts             — Browser client (use everywhere)
       server.ts             — Server client (API routes only)
     navItems.ts             — Single source of truth for every role's nav (coachNav/adminOnlyNav/parentNav/playerNav + coach/parent/playerPrimaryHrefs for MobileNav's quick-access bar) — shared by Sidebar.tsx and MobileNav.tsx so they can't drift apart
-    permissions.ts          — PERMISSION_AREAS (17 areas) + hasPermission() for admin AND coach granular access (see RBAC notes)
+    permissions.ts          — PERMISSION_AREAS (18 areas) + hasPermission() for admin AND coach granular access (see RBAC notes)
     audit.ts                — logAudit() — fire-and-forget insert into audit_log, used across most mutating actions
   hooks/
     usePWA.ts               — Online/offline + install prompt
@@ -186,6 +187,8 @@ supabase/
   schema_v11_additions.sql  — Additive migration: protect_profile_role trigger now also honors auth.role()='service_role' (fixes invite role reversion), adds the missing income RLS SELECT policy for donor_profile_id (run AFTER v10)
   schema_v12_additions.sql  — Additive migration: promotes assigned_categories/permissions from UI convenience to a real RLS boundary — has_area_permission()/in_category_scope()/in_player_category_scope() helpers, rewritten write-access policies across ~15 tables, search_path hardening on 4 pre-existing functions, and revokes the new helpers' implicit PUBLIC execute grant (run AFTER v11; see RBAC notes for the full design)
   schema_v13_additions.sql  — Additive migration: player_applications/player_application_children tables for public self-service registration — public insert-only RLS (no SELECT for anon/authenticated), coach/admin read+write gated by the new `registrations` permission area (run AFTER v12; see "Player Registration" below)
+  schema_v14_additions.sql  — Additive migration: Drill Library phase 1 — drills, training_materials, material_chunks tables, all gated by the new `drill_library` permission area (run AFTER v13; see "Drill Library" below)
+  schema_v15_additions.sql  — Additive migration: session_drills — assigns Drill Library entries to a specific training session, in order (Session Plan), gated by the `sessions` permission area (run AFTER v14; see "Drill Library" below)
 ```
 
 ---
@@ -213,6 +216,10 @@ supabase/
 | `audit_log` | Append-only activity trail for the Super Admin panel. `actor_id`/`actor_name`/`actor_role`, `action` (create/update/delete/invite/promote/demote/award), `entity` (…/`account` for new signups, logged directly by the `handle_new_user` trigger since self-registration never goes through the app's `logAudit()`) + `entity_id`, human-readable `summary`, optional `metadata` jsonb. Admin-only read via RLS; any coach/admin (or the trigger, running as a security-definer function) can insert |
 | `player_applications` | Guardian info from a public `/apply` submission (guardian_name, relationship, phone_primary/secondary, email, address_line1/2). One row per household submission, covering however many children were added. RLS: public insert (`with check (true)`, no `TO` clause — anon and authenticated both), SELECT/write restricted to admin/coach — see "Player Registration" below |
 | `player_application_children` | One row per child on a `player_applications` submission (full_name, date_of_birth, school_grade, medical_conditions, takes_medication, `status` pending/approved/rejected, `resolved_player_id` once approved, `reviewed_by`/`reviewed_at`/`review_note`). Same public-insert RLS shape as `player_applications`; UPDATE/DELETE gated by the `registrations` permission area |
+| `drills` | Drill Library (v14): name, `categories`/`tags` (text[], same array convention as `point_rules.category`), `game_format` (Dropdown-List key `drill_game_formats`), `team_setup` (jsonb, freeform shape — not yet surfaced in the UI, reserved for the extraction phase), min/max players, duration, equipment, field_dimensions, description/setup_instructions/coaching_points, `source_material_id`/`source_page_range` (provenance once extraction lands), `status` draft/published (manual entries publish immediately; extraction will land as draft for review). Read: any coach/admin. Write: `drill_library` permission area |
+| `training_materials` | Drill Library (v14): one row per source PDF for the planned extraction phase — title, total_pages, `status` pending/processing/done, processed_pages. Nothing writes to this yet (phase 1 ships the schema only) |
+| `session_drills` | Join table (v15) assigning `drills` to a specific `training_sessions` row — the Session Plan a coach builds on the session detail page. `sort_order` (int) is the plan order (reorderable via up/down arrows); `unique(session_id, drill_id)` so the same drill can't be added twice to one session. Read: any coach/admin. Write: `sessions` permission area (not `drill_library` — assigning happens from session planning, same split as attendance writes being gated by `sessions`) |
+| `material_chunks` | Drill Library (v14): one row per page-range of a `training_materials` PDF handed to a model for extraction — the "already gone through" tracker that makes re-running extraction resumable instead of repeating a chunk. Nothing writes to this yet |
 
 ---
 
@@ -360,6 +367,7 @@ the chips (and `togglePermission()` itself) now refuse a self-target.
 - [ ] Deferred as low-severity/code-quality from the second audit (not fixed this round): `/scan` has no `CoachGuard` wrapper of its own (relies on being unreachable without a session in practice); a few small duplicated UI bits (spinner markup, tooltip patterns) could be extracted into shared components; some dashboard summary cards don't live-refresh after a mutation elsewhere on the page (a manual reload picks up the change).
 - [ ] `/apply` has no CAPTCHA or rate-limiting — same trust model as the old Google Form (anyone with the link can submit, vetted afterward by a coach). Revisit if spam submissions become a real problem.
 - [ ] The Onboarding Gate's notification step only primes the browser's `Notification.requestPermission()` — there's no actual push-sending backend yet (VAPID keys, a subscriptions table, a send pipeline). Folds into the existing Brevo/push TODO above once that infrastructure gets built.
+- [ ] Drill Library phase 2 (AI-assisted extraction from the club's PDF coaching materials) — see "Drill Library" above for the planned model-agnostic extraction contract and the `material_chunks` tracker. Nothing writes to `training_materials`/`material_chunks` yet; phase 1 (manual add/edit/delete, browse/filter) is what's actually live.
 
 ---
 
@@ -451,6 +459,84 @@ through to the real dashboard.
   future work before this round.
 
 ---
+
+## Drill Library
+`/coach/drill-library` (area `drill_library`) — a shared, searchable database
+of training drills every coach can browse and build sessions from, instead of
+each coach keeping their own notes. Phase 1 (shipped): manual add/edit/delete,
+filter by category and search by name/tag, `drills` table with `status`
+draft/published (manual entries publish immediately).
+
+**Draft review (shipped):** the drill detail page has a Publish/Unpublish
+button (`togglePublish()`) that flips `drills.status` between `draft` and
+`published`, logged via `logAudit()`. The list page shows every status by
+default (not just published) with a status filter chip row (All/Published/
+Drafts) and an amber "Draft" badge per card, plus a header count of drills
+"awaiting review" — needed so extraction-landed drafts (see below) are
+actually reachable; before this there was no way to find or publish a draft
+from the UI at all.
+
+**Session Plan (shipped, v15):** a coach builds an actual training programme
+by assigning drills from the library to a specific session — `session_drills`
+join table (`sort_order` for plan order, `unique(session_id, drill_id)`). Lives
+on the session detail page (`/coach/sessions/[id]`) as a "Session Plan" card:
+pick a drill from a dropdown of published drills not already on the plan, it's
+appended to the end; up/down arrows swap `sort_order` with the adjacent row;
+trash removes it from the plan (never deletes the underlying drill). Gated by
+the `sessions` permission area, not `drill_library` — assigning is part of
+session planning, done from the page a coach is already managing the session
+from, not the library itself. Deliberately a thin join table rather than a
+reusable "programme template" — a saved/reusable plan (e.g. a standing "U9
+Monday" template droppable onto any future session) can be layered on top of
+`session_drills` later without a breaking change.
+
+**Planned next phase — AI-assisted extraction from PDF coaching materials,
+deliberately model-agnostic:** the club has ~25 PDFs of coaching material
+(thousands of pages total) to mine for drills. Rather than building a live
+integration to one AI vendor, the plan is a **fixed extraction contract** —
+one documented prompt + one JSON schema matching the `drills` columns — that
+any LLM (Claude, Gemini, ChatGPT, whichever has quota that day) can be handed
+a PDF chunk against, with the output always landing in the same Supabase
+tables regardless of which model produced it.
+- A large PDF is split into page-range chunks first (a plain Python/pypdf
+  script — splitting a PDF needs no app or AI, see `chunk_pdf.py` handed to
+  the club separately). Each chunk becomes a `material_chunks` row.
+- `material_chunks.status` (pending/done) is the "already gone through"
+  tracker: re-running extraction later, possibly with a different model,
+  never repeats a chunk that's already done. `drills_extracted` on that row
+  records how many drills it yielded.
+- Extraction should land as `drills.status = 'draft'`, not auto-published —
+  raw extraction from coaching PDFs involves real judgment calls (is this a
+  U9 or U13 drill?), so a coach/admin reviews and publishes, the same
+  review-before-live pattern `/apply` → `player_applications` already uses.
+- `drills.source_material_id`/`source_page_range` carry provenance back to
+  the originating PDF and page range for both manual and extracted entries.
+- `drills.team_setup` (jsonb) exists in the schema now but isn't surfaced in
+  the phase-1 UI yet — reserved for when extraction needs to capture
+  structured formats like `{"attackers":5,"defenders":3}` or `{"team_a":1,
+  "team_b":1}` (1v1) that free text can't be filtered on.
+
+**First real extraction (done by hand, proves the contract):** one PDF —
+"30 Exercises" (CoachiFoot/Cyril Vanlerberghe, 35 pages) — was read directly
+in a Claude Code chat session (no chunking script or automated pipeline
+involved yet) and all 30 exercises landed in production as `draft` drills,
+with a `training_materials` row for the PDF and four `material_chunks` rows
+(one per page-range batch actually read: 5-10, 11-20, 21-30, 31-34, each
+marked `done` with its `drills_extracted` count) for provenance. These are
+sitting in the live Drill Library's Drafts filter awaiting review/publish —
+nothing was auto-published. This was the forcing function for the
+Publish/Unpublish button above, which didn't exist before this and would
+have left these drafts permanently unreachable in the UI.
+
+Large binary files (the source PDFs, extracted page-range chunks) are not
+practical to move through a Claude session's own tool calls — base64-encoding
+a multi-page PDF and passing it as a tool parameter costs roughly one token
+per base64 character, so even a modest chunk can cost hundreds of thousands
+of tokens just to shuttle through a model's context. The practical pattern
+is: the PDFs live in the club's own Google Drive or get attached directly to
+a chat session (free, handled by platform infra, not by the model); any
+model doing the actual extraction reads a chunk directly rather than having
+Claude relay its bytes.
 
 ## What To Work On Next
 When I say "continue", pick up from the TODO list above.

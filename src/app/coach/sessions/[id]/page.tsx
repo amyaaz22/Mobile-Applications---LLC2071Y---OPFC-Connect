@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useParams, useRouter } from 'next/navigation'
 import { formatDate, formatTime, categoryColor } from '@/lib/utils'
-import { ArrowLeft, QrCode, CheckCircle, XCircle, Clock, Users, Trash2, Link2, Copy } from 'lucide-react'
+import { ArrowLeft, QrCode, CheckCircle, XCircle, Clock, Users, Trash2, Link2, Copy, ChevronUp, ChevronDown, BookOpen } from 'lucide-react'
 import Link from 'next/link'
 import { toast } from 'react-hot-toast'
 import { usePermissionGuard } from '@/hooks/usePermissionGuard'
@@ -19,6 +19,9 @@ export default function SessionDetailPage() {
   const [allPlayers, setAllPlayers] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [generatingLink, setGeneratingLink] = useState(false)
+  const [sessionDrills, setSessionDrills] = useState<any[]>([])
+  const [availableDrills, setAvailableDrills] = useState<any[]>([])
+  const [selectedDrillId, setSelectedDrillId] = useState('')
 
   useEffect(() => { fetchData() }, [params.id])
 
@@ -45,7 +48,51 @@ export default function SessionDetailPage() {
       .or(s.category === 'All' ? 'category.neq.null' : `category.eq.${s.category}`)
       .order('full_name')
     setAllPlayers(players ?? [])
+
+    const { data: sd } = await supabase
+      .from('session_drills')
+      .select('*, drill:drills(id, name, categories, game_format, duration_minutes)')
+      .eq('session_id', params.id as string)
+      .order('sort_order')
+    setSessionDrills(sd ?? [])
+
+    const { data: drillsData } = await supabase
+      .from('drills')
+      .select('id, name, categories, game_format, duration_minutes')
+      .eq('status', 'published')
+      .order('name')
+    setAvailableDrills(drillsData ?? [])
+
     setLoading(false)
+  }
+
+  async function addDrill() {
+    if (!selectedDrillId) return
+    const nextOrder = sessionDrills.length
+    const { error } = await supabase.from('session_drills').insert({
+      session_id: params.id as string, drill_id: selectedDrillId, sort_order: nextOrder,
+    })
+    if (error) { toast.error('Failed to add drill'); return }
+    setSelectedDrillId('')
+    fetchData()
+  }
+
+  async function removeDrill(id: string) {
+    const { error } = await supabase.from('session_drills').delete().eq('id', id)
+    if (error) { toast.error('Failed to remove drill'); return }
+    fetchData()
+  }
+
+  async function moveDrill(index: number, direction: -1 | 1) {
+    const swapIndex = index + direction
+    if (swapIndex < 0 || swapIndex >= sessionDrills.length) return
+    const a = sessionDrills[index]
+    const b = sessionDrills[swapIndex]
+    await Promise.all([
+      supabase.from('session_drills').update({ sort_order: b.sort_order }).eq('id', a.id),
+      supabase.from('session_drills').update({ sort_order: a.sort_order }).eq('id', b.id),
+    ])
+    fetchData()
   }
 
   async function markAttendance(playerId: string, status: 'present' | 'absent') {
@@ -155,6 +202,52 @@ export default function SessionDetailPage() {
             </button>
           </div>
         )}
+      </div>
+
+      {/* Session plan — drills assigned from the Drill Library */}
+      <div className="card overflow-hidden mb-6">
+        <div className="p-4 border-b border-white/5 flex items-center justify-between">
+          <h2 className="text-white font-bold flex items-center gap-2"><BookOpen size={16} className="text-teal-400"/> Session Plan</h2>
+          <span className="text-white/30 text-xs">{sessionDrills.length} drill{sessionDrills.length === 1 ? '' : 's'}</span>
+        </div>
+        <div className="p-4 space-y-2">
+          {sessionDrills.length === 0 && (
+            <p className="text-white/30 text-sm py-2">No drills added yet — build this session's plan from the library below.</p>
+          )}
+          {sessionDrills.map((sd, i) => (
+            <div key={sd.id} className="flex items-center gap-3 p-3 rounded-lg bg-white/5">
+              <div className="flex flex-col flex-shrink-0">
+                <button onClick={() => moveDrill(i, -1)} disabled={i === 0}
+                  className="text-white/30 hover:text-white disabled:opacity-20 disabled:hover:text-white/30 transition-colors">
+                  <ChevronUp size={14}/>
+                </button>
+                <button onClick={() => moveDrill(i, 1)} disabled={i === sessionDrills.length - 1}
+                  className="text-white/30 hover:text-white disabled:opacity-20 disabled:hover:text-white/30 transition-colors">
+                  <ChevronDown size={14}/>
+                </button>
+              </div>
+              <Link href={`/coach/drill-library/${sd.drill_id}`} className="flex-1 min-w-0">
+                <p className="text-white text-sm font-medium truncate">{sd.drill?.name ?? 'Drill removed from library'}</p>
+                <div className="flex items-center gap-2 text-white/30 text-xs mt-0.5">
+                  {sd.drill?.game_format && <span>{sd.drill.game_format}</span>}
+                  {sd.drill?.duration_minutes && <span>· {sd.drill.duration_minutes} min</span>}
+                </div>
+              </Link>
+              <button onClick={() => removeDrill(sd.id)} className="text-white/20 hover:text-red-400 transition-colors p-1 flex-shrink-0" title="Remove from plan">
+                <Trash2 size={14}/>
+              </button>
+            </div>
+          ))}
+          <div className="flex gap-2 pt-2">
+            <select className="input flex-1" value={selectedDrillId} onChange={e => setSelectedDrillId(e.target.value)}>
+              <option value="">Add a drill from the library…</option>
+              {availableDrills.filter(d => !sessionDrills.some(sd => sd.drill_id === d.id)).map(d => (
+                <option key={d.id} value={d.id}>{d.name}</option>
+              ))}
+            </select>
+            <button onClick={addDrill} disabled={!selectedDrillId} className="btn-secondary text-sm flex-shrink-0">Add</button>
+          </div>
+        </div>
       </div>
 
       {/* Attendance list */}
