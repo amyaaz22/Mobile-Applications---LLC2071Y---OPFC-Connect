@@ -4,7 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'react-hot-toast'
-import { ArrowLeft, Pencil, Trash2, Users, Clock, MapPin } from 'lucide-react'
+import { ArrowLeft, Pencil, Trash2, Users, Clock, MapPin, Eye, EyeOff } from 'lucide-react'
 import ListEditor from '@/components/ListEditor'
 import { categoryColor } from '@/lib/utils'
 import { useConfigList } from '@/hooks/useConfigList'
@@ -87,6 +87,15 @@ export default function DrillDetailPage() {
     fetchDrill()
   }
 
+  async function togglePublish() {
+    const next = drill.status === 'published' ? 'draft' : 'published'
+    const { error } = await supabase.from('drills').update({ status: next, updated_at: new Date().toISOString() }).eq('id', params.id as string)
+    if (error) { toast.error('Failed to update status'); return }
+    logAudit(supabase, { action: 'update', entity: 'drill', entity_id: params.id as string, summary: `${next === 'published' ? 'Published' : 'Unpublished'} drill "${drill.name}"` })
+    toast.success(next === 'published' ? 'Published' : 'Moved back to draft')
+    fetchDrill()
+  }
+
   async function remove() {
     if (!confirm(`Delete "${drill.name}"? This cannot be undone.`)) return
     const { error } = await supabase.from('drills').delete().eq('id', params.id as string)
@@ -113,12 +122,16 @@ export default function DrillDetailPage() {
           <div className="flex items-start justify-between gap-3 mb-2">
             <h1 className="page-title">{drill.name}</h1>
             <div className="flex gap-2 flex-shrink-0">
+              <button onClick={togglePublish} className="btn-secondary flex items-center gap-2 text-sm">
+                {drill.status === 'published' ? <><EyeOff size={14}/> Unpublish</> : <><Eye size={14}/> Publish</>}
+              </button>
               <button onClick={startEdit} className="btn-secondary flex items-center gap-2 text-sm"><Pencil size={14}/> Edit</button>
               <button onClick={remove} className="btn-danger flex items-center gap-2 text-sm"><Trash2 size={14}/></button>
             </div>
           </div>
 
           <div className="flex items-center gap-2 flex-wrap mb-5">
+            {drill.status === 'draft' && <span className="badge bg-amber-400/10 border-amber-400/30 text-amber-400 text-xs">Draft — awaiting review</span>}
             {(drill.categories ?? []).map((c: string) => <span key={c} className={`badge text-xs ${categoryColor(c)}`}>{c}</span>)}
             {drill.game_format && <span className="badge bg-white/5 border-white/10 text-white/50 text-xs">{drill.game_format}</span>}
           </div>

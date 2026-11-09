@@ -467,6 +467,15 @@ each coach keeping their own notes. Phase 1 (shipped): manual add/edit/delete,
 filter by category and search by name/tag, `drills` table with `status`
 draft/published (manual entries publish immediately).
 
+**Draft review (shipped):** the drill detail page has a Publish/Unpublish
+button (`togglePublish()`) that flips `drills.status` between `draft` and
+`published`, logged via `logAudit()`. The list page shows every status by
+default (not just published) with a status filter chip row (All/Published/
+Drafts) and an amber "Draft" badge per card, plus a header count of drills
+"awaiting review" — needed so extraction-landed drafts (see below) are
+actually reachable; before this there was no way to find or publish a draft
+from the UI at all.
+
 **Session Plan (shipped, v15):** a coach builds an actual training programme
 by assigning drills from the library to a specific session — `session_drills`
 join table (`sort_order` for plan order, `unique(session_id, drill_id)`). Lives
@@ -506,6 +515,18 @@ tables regardless of which model produced it.
   the phase-1 UI yet — reserved for when extraction needs to capture
   structured formats like `{"attackers":5,"defenders":3}` or `{"team_a":1,
   "team_b":1}` (1v1) that free text can't be filtered on.
+
+**First real extraction (done by hand, proves the contract):** one PDF —
+"30 Exercises" (CoachiFoot/Cyril Vanlerberghe, 35 pages) — was read directly
+in a Claude Code chat session (no chunking script or automated pipeline
+involved yet) and all 30 exercises landed in production as `draft` drills,
+with a `training_materials` row for the PDF and four `material_chunks` rows
+(one per page-range batch actually read: 5-10, 11-20, 21-30, 31-34, each
+marked `done` with its `drills_extracted` count) for provenance. These are
+sitting in the live Drill Library's Drafts filter awaiting review/publish —
+nothing was auto-published. This was the forcing function for the
+Publish/Unpublish button above, which didn't exist before this and would
+have left these drafts permanently unreachable in the UI.
 
 Large binary files (the source PDFs, extracted page-range chunks) are not
 practical to move through a Claude session's own tool calls — base64-encoding

@@ -18,6 +18,7 @@ export default function DrillLibraryPage() {
   const [search, setSearch] = useState('')
   const [category, setCategory] = useState('All')
   const [categories, setCategories] = useState<string[]>(FALLBACK_CATEGORIES)
+  const [statusFilter, setStatusFilter] = useState<'all' | 'published' | 'draft'>('all')
 
   useEffect(() => {
     supabase.from('club_settings').select('value').eq('key', 'categories').single()
@@ -30,7 +31,6 @@ export default function DrillLibraryPage() {
     const { data } = await supabase
       .from('drills')
       .select('*')
-      .eq('status', 'published')
       .order('name')
     setDrills(data ?? [])
     setLoading(false)
@@ -45,7 +45,10 @@ export default function DrillLibraryPage() {
     fetchDrills()
   }
 
+  const draftCount = drills.filter(d => d.status === 'draft').length
+
   const filtered = drills.filter(d => {
+    if (statusFilter !== 'all' && d.status !== statusFilter) return false
     if (category !== 'All' && !(d.categories ?? []).includes(category) && !(d.categories ?? []).includes('All')) return false
     if (search && !d.name.toLowerCase().includes(search.toLowerCase()) && !(d.tags ?? []).some((t: string) => t.toLowerCase().includes(search.toLowerCase()))) return false
     return true
@@ -62,7 +65,10 @@ export default function DrillLibraryPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="page-title">Drill Library</h1>
-          <p className="text-white/30 text-sm mt-1">{drills.length} drill{drills.length === 1 ? '' : 's'} — shared across every coach</p>
+          <p className="text-white/30 text-sm mt-1">
+            {drills.length} drill{drills.length === 1 ? '' : 's'} — shared across every coach
+            {draftCount > 0 && <span className="text-amber-400"> · {draftCount} awaiting review</span>}
+          </p>
         </div>
         <Link href="/coach/drill-library/new" className="btn-primary flex items-center gap-2 text-sm self-start">
           <Plus size={14}/> Add Drill
@@ -93,6 +99,18 @@ export default function DrillLibraryPage() {
         </div>
       </div>
 
+      <div className="flex gap-2 mb-6">
+        {(['all', 'published', 'draft'] as const).map(s => (
+          <button key={s} onClick={() => setStatusFilter(s)}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all border
+              ${statusFilter === s
+                ? 'bg-teal-400/10 border-teal-400/30 text-teal-400'
+                : 'bg-white/5 border-white/10 text-white/40 hover:text-white hover:border-white/20'}`}>
+            {s === 'all' ? 'All' : s === 'published' ? 'Published' : `Drafts${draftCount ? ` (${draftCount})` : ''}`}
+          </button>
+        ))}
+      </div>
+
       {loading ? (
         <div className="flex items-center justify-center py-16 text-white/30 gap-3">
           <div className="animate-spin w-6 h-6 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>Loading…
@@ -116,6 +134,7 @@ export default function DrillLibraryPage() {
                 </button>
               </div>
               <div className="flex items-center gap-2 flex-wrap mb-2">
+                {d.status === 'draft' && <span className="badge bg-amber-400/10 border-amber-400/30 text-amber-400 text-xs">Draft</span>}
                 {(d.categories ?? []).map((c: string) => (
                   <span key={c} className={`badge text-xs ${categoryColor(c)}`}>{c}</span>
                 ))}
