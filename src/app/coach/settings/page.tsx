@@ -16,6 +16,7 @@ const DEFAULT_LISTS: Record<string, string[]> = {
   income_sources: ['Donation', 'Sponsorship', 'Fundraiser', 'Grant', 'Other'],
   inventory_categories: ['Jerseys', 'Balls', 'Training Equipment', 'Goals & Nets', 'Medical Kit', 'Bibs & Cones', 'Other'],
   inventory_conditions: ['New', 'Good', 'Worn', 'Damaged'],
+  drill_game_formats: ['Small-Sided Game', '1v1', 'Rondo', 'Possession', 'Technical', 'Conditioned Game', 'Tactical', 'Other'],
 }
 
 const LIST_LABELS: Record<string, { title: string; hint: string }> = {
@@ -27,6 +28,7 @@ const LIST_LABELS: Record<string, { title: string; hint: string }> = {
   income_sources: { title: 'Income Sources', hint: 'Used when recording a donation or other income.' },
   inventory_categories: { title: 'Inventory Categories', hint: 'Used when adding an inventory item.' },
   inventory_conditions: { title: 'Inventory Conditions', hint: 'Used when adding or editing an inventory item.' },
+  drill_game_formats: { title: 'Drill Game Formats', hint: 'Used when adding a drill to the Drill Library.' },
 }
 
 function CollapsibleListCard({ listKey, items, onChange }: { listKey: string; items: string[]; onChange: (items: string[]) => void }) {
