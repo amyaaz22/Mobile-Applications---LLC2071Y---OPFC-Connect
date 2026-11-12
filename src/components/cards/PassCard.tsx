@@ -20,16 +20,38 @@ function GuardianBadge({ phone, phone2 }: { phone?: string; phone2?: string }) {
   const secondary = phone2 && phone2 !== phone ? phone2 : undefined
   return (
     <div style={{
-      marginTop: 6, display: 'flex', alignItems: 'center', gap: 6,
-      width: 'fit-content', padding: '3px 9px 3px 3px',
-      background: 'rgba(78,198,198,0.08)', border: '1px solid rgba(78,198,198,0.22)', borderRadius: 20,
+      marginTop: 7, display: 'inline-flex', alignItems: 'center', height: 20, gap: 6,
+      padding: '0 10px 0 3px',
+      background: 'rgba(78,198,198,0.08)', border: '1px solid rgba(78,198,198,0.25)', borderRadius: 10,
     }}>
-      <div style={{ width: 16, height: 16, borderRadius: '50%', background: 'rgba(78,198,198,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-        <Phone size={9} color="#4EC6C6" strokeWidth={2.5}/>
+      <div style={{ width: 14, height: 14, borderRadius: '50%', background: 'rgba(78,198,198,0.22)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <Phone size={8} color="#4EC6C6" strokeWidth={2.5} style={{ display: 'block' }}/>
       </div>
-      <span style={{ color: 'rgba(255,255,255,0.75)', fontSize: 9, fontWeight: 600, letterSpacing: 0.2 }}>
+      <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: 9, fontWeight: 600, lineHeight: '20px', letterSpacing: 0.2, whiteSpace: 'nowrap' }}>
         {phone}{secondary ? ` / ${secondary}` : ''}
       </span>
+    </div>
+  )
+}
+
+// Fixed, always-square medallion for the club logo — used as the photo
+// placeholder. A dedicated 1:1 wrapper (rather than sizing the <img> as a
+// percentage of the non-square photo frame) is what actually prevents the
+// logo from reading as squashed/stretched, regardless of the frame's own
+// aspect ratio.
+function LogoMedallion({ logoUrl, size = 80 }: { logoUrl?: string; size?: number }) {
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: '50%', flexShrink: 0, overflow: 'hidden',
+      background: '#0D1B2A', border: '2px solid rgba(78,198,198,0.45)',
+      boxShadow: '0 0 10px rgba(78,198,198,0.35), inset 0 0 8px rgba(78,198,198,0.1)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      {logoUrl ? (
+        <img src={logoUrl} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} alt="Club logo"/>
+      ) : (
+        <span style={{ color: '#4EC6C6', fontWeight: 900, fontSize: size * 0.2, letterSpacing: 0 }}>OPFC</span>
+      )}
     </div>
   )
 }
@@ -42,7 +64,8 @@ export function PassCardFront({ player, logoUrl, clubName, guardianPhone, guardi
     <div style={{
       width: 340, height: 214,
       background: 'linear-gradient(145deg, #0D1B2A 0%, #132030 40%, #1A2E45 100%)',
-      borderRadius: 14, border: '2px solid rgba(78,198,198,0.35)',
+      borderRadius: 14, border: '2px solid rgba(78,198,198,0.4)',
+      boxShadow: '0 0 0 1px rgba(78,198,198,0.08), 0 0 22px rgba(78,198,198,0.12)',
       position: 'relative', overflow: 'hidden', fontFamily: 'Arial, sans-serif',
     }}>
       {/* Top accent bar */}
@@ -56,17 +79,18 @@ export function PassCardFront({ player, logoUrl, clubName, guardianPhone, guardi
         {clubName ?? 'Oasis Pailles FC'}
       </div>
 
-      {/* Player photo — right side. Falls back to the club logo (large) when
-          there's no photo yet, instead of a generic silhouette. */}
-      <div style={{ position: 'absolute', right: 16, top: 50, width: 112, height: 140, borderRadius: 10, overflow: 'hidden', border: '2px solid rgba(78,198,198,0.25)', background: 'rgba(78,198,198,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      {/* Player photo — right side. Falls back to a fixed-aspect logo
+          medallion when there's no photo yet, instead of a generic silhouette. */}
+      <div style={{
+        position: 'absolute', right: 16, top: 50, width: 112, height: 140, borderRadius: 10, overflow: 'hidden',
+        border: '2px solid rgba(78,198,198,0.3)', background: 'rgba(78,198,198,0.05)',
+        boxShadow: '0 0 12px rgba(78,198,198,0.15)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+      }}>
         {player.photo_url ? (
           <img src={player.photo_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={player.full_name}/>
-        ) : logoUrl ? (
-          <img src={logoUrl} style={{ width: '78%', height: '78%', objectFit: 'contain' }} alt="Club logo"/>
         ) : (
-          <div style={{ width: 72, height: 72, borderRadius: '50%', background: '#4EC6C6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ color: '#0D1B2A', fontWeight: 900, fontSize: 15, letterSpacing: 0 }}>OPFC</span>
-          </div>
+          <LogoMedallion logoUrl={logoUrl} size={80}/>
         )}
       </div>
 
@@ -85,11 +109,9 @@ export function PassCardFront({ player, logoUrl, clubName, guardianPhone, guardi
         <GuardianBadge phone={guardianPhone} phone2={guardianPhone2}/>
       </div>
 
-      {/* Player code — bottom left */}
-      <div style={{ position: 'absolute', bottom: 12, left: 14 }}>
-        <div style={{ color: 'rgba(255,255,255,0.15)', fontSize: 7, fontFamily: 'monospace', letterSpacing: 1 }}>
-          {player.player_code}
-        </div>
+      {/* Member ID — bottom left */}
+      <div style={{ position: 'absolute', bottom: 12, left: 14, color: 'rgba(255,255,255,0.35)', fontSize: 8, letterSpacing: 0.3 }}>
+        Member ID: <span style={{ color: 'rgba(255,255,255,0.5)', fontWeight: 600 }}>{player.player_code}</span>
       </div>
 
       {/* Bottom teal line */}
@@ -104,7 +126,8 @@ export function PassCardBack({ player, qrUrl, guardianPhone, guardianPhone2 }: {
     <div style={{
       width: 340, height: 214,
       background: 'linear-gradient(145deg, #091520 0%, #0D1B2A 100%)',
-      borderRadius: 14, border: '2px solid rgba(78,198,198,0.35)',
+      borderRadius: 14, border: '2px solid rgba(78,198,198,0.4)',
+      boxShadow: '0 0 0 1px rgba(78,198,198,0.08), 0 0 22px rgba(78,198,198,0.12)',
       position: 'relative', overflow: 'hidden', fontFamily: 'Arial, sans-serif',
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
     }}>
@@ -113,7 +136,9 @@ export function PassCardBack({ player, qrUrl, guardianPhone, guardianPhone2 }: {
       {/* QR section */}
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
         {qrUrl ? (
-          <img src={qrUrl} style={{ width: 140, height: 140, borderRadius: 8 }} alt="QR Code"/>
+          <div style={{ padding: 6, borderRadius: 10, border: '1px solid rgba(78,198,198,0.25)', boxShadow: '0 0 12px rgba(78,198,198,0.18)' }}>
+            <img src={qrUrl} style={{ width: 128, height: 128, display: 'block', borderRadius: 4 }} alt="QR Code"/>
+          </div>
         ) : (
           <div style={{ width: 140, height: 140, background: 'rgba(78,198,198,0.05)', borderRadius: 8, border: '1px dashed rgba(78,198,198,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(78,198,198,0.3)', fontSize: 11 }}>QR</div>
         )}
