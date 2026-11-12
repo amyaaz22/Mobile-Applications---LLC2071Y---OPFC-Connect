@@ -137,6 +137,7 @@ export default function ScanPage() {
         .from('players')
         .select('id, full_name, player_code, category')
         .eq('id', playerId)
+        .eq('is_active', true)
         .single()
       player = data
     }

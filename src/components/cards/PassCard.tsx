@@ -1,7 +1,7 @@
 'use client'
 import { useRef, useState } from 'react'
 import { Player } from '@/types/database'
-import { Download } from 'lucide-react'
+import { Download, Phone } from 'lucide-react'
 
 interface PassCardProps {
   player: Player
@@ -9,11 +9,33 @@ interface PassCardProps {
   logoUrl?: string
   clubName?: string
   guardianPhone?: string
+  guardianPhone2?: string
+}
+
+// Guardian contact chip — shared by front and back. Supports the club's
+// "primary/secondary" notation: pass both numbers and they render as
+// "primary / secondary"; pass only one and it renders alone.
+function GuardianBadge({ phone, phone2 }: { phone?: string; phone2?: string }) {
+  if (!phone) return null
+  const secondary = phone2 && phone2 !== phone ? phone2 : undefined
+  return (
+    <div style={{
+      marginTop: 6, display: 'flex', alignItems: 'center', gap: 6,
+      width: 'fit-content', padding: '3px 9px 3px 3px',
+      background: 'rgba(78,198,198,0.08)', border: '1px solid rgba(78,198,198,0.22)', borderRadius: 20,
+    }}>
+      <div style={{ width: 16, height: 16, borderRadius: '50%', background: 'rgba(78,198,198,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <Phone size={9} color="#4EC6C6" strokeWidth={2.5}/>
+      </div>
+      <span style={{ color: 'rgba(255,255,255,0.75)', fontSize: 9, fontWeight: 600, letterSpacing: 0.2 }}>
+        {phone}{secondary ? ` / ${secondary}` : ''}
+      </span>
+    </div>
+  )
 }
 
 // Card Front — Club Pass
-export function PassCardFront({ player, logoUrl, clubName, guardianPhone }: { player: Player; logoUrl?: string; clubName?: string; guardianPhone?: string }) {
-  const season = `${new Date().getFullYear()}/${new Date().getFullYear() + 1}`
+export function PassCardFront({ player, logoUrl, clubName, guardianPhone, guardianPhone2 }: { player: Player; logoUrl?: string; clubName?: string; guardianPhone?: string; guardianPhone2?: string }) {
   const initials = player.full_name.split(' ').map((n: string) => n[0]).join('').slice(0, 3).toUpperCase()
 
   return (
@@ -22,7 +44,6 @@ export function PassCardFront({ player, logoUrl, clubName, guardianPhone }: { pl
       background: 'linear-gradient(145deg, #0D1B2A 0%, #132030 40%, #1A2E45 100%)',
       borderRadius: 14, border: '2px solid rgba(78,198,198,0.35)',
       position: 'relative', overflow: 'hidden', fontFamily: 'Arial, sans-serif',
-      boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
     }}>
       {/* Top accent bar */}
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: 'linear-gradient(90deg, #4EC6C6, #2A8080)' }}/>
@@ -30,34 +51,21 @@ export function PassCardFront({ player, logoUrl, clubName, guardianPhone }: { pl
       {/* Diagonal background accent */}
       <div style={{ position: 'absolute', top: 0, right: 0, width: 140, height: '100%', background: 'linear-gradient(135deg, transparent 30%, rgba(78,198,198,0.04) 100%)' }}/>
 
-      {/* Club Logo — top left */}
-      <div style={{ position: 'absolute', top: 14, left: 14, display: 'flex', alignItems: 'center', gap: 8 }}>
-        {logoUrl ? (
-          <img src={logoUrl} style={{ width: 36, height: 36, objectFit: 'contain' }} alt="Club logo"/>
-        ) : (
-          <div style={{ width: 36, height: 36, borderRadius: '50%', background: '#4EC6C6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ color: '#0D1B2A', fontWeight: 900, fontSize: 8, letterSpacing: 0 }}>OPFC</span>
-          </div>
-        )}
-        <div>
-          <div style={{ color: 'rgba(255,255,255,0.9)', fontSize: 9, fontWeight: 700, letterSpacing: 0.5 }}>
-            {clubName ?? 'Oasis Pailles FC'}
-          </div>
-          <div style={{ color: '#4EC6C6', fontSize: 8, letterSpacing: 0.3 }}>Season {season}</div>
-        </div>
+      {/* Club name — top left, no logo/season here (logo moved into the photo slot below) */}
+      <div style={{ position: 'absolute', top: 14, left: 14, color: 'rgba(255,255,255,0.9)', fontSize: 9, fontWeight: 700, letterSpacing: 0.5 }}>
+        {clubName ?? 'Oasis Pailles FC'}
       </div>
 
-
-      {/* Player photo — right side */}
-      <div style={{ position: 'absolute', right: 16, top: 50, width: 112, height: 140, borderRadius: 10, overflow: 'hidden', border: '2px solid rgba(78,198,198,0.25)', background: 'rgba(78,198,198,0.05)' }}>
+      {/* Player photo — right side. Falls back to the club logo (large) when
+          there's no photo yet, instead of a generic silhouette. */}
+      <div style={{ position: 'absolute', right: 16, top: 50, width: 112, height: 140, borderRadius: 10, overflow: 'hidden', border: '2px solid rgba(78,198,198,0.25)', background: 'rgba(78,198,198,0.05)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         {player.photo_url ? (
           <img src={player.photo_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={player.full_name}/>
+        ) : logoUrl ? (
+          <img src={logoUrl} style={{ width: '78%', height: '78%', objectFit: 'contain' }} alt="Club logo"/>
         ) : (
-          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <svg viewBox="0 0 60 80" width={60} height={80} fill="rgba(78,198,198,0.25)">
-              <circle cx="30" cy="20" r="16"/>
-              <path d="M4 80 C4 50 56 50 56 80"/>
-            </svg>
+          <div style={{ width: 72, height: 72, borderRadius: '50%', background: '#4EC6C6', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <span style={{ color: '#0D1B2A', fontWeight: 900, fontSize: 15, letterSpacing: 0 }}>OPFC</span>
           </div>
         )}
       </div>
@@ -65,7 +73,7 @@ export function PassCardFront({ player, logoUrl, clubName, guardianPhone }: { pl
       {/* Player info — left side */}
       <div style={{ position: 'absolute', left: 14, top: 54, right: 144 }}>
         {/* Large initials */}
-        <div style={{ color: '#4EC6C6', fontSize: 42, fontWeight: 900, lineHeight: 1, letterSpacing: -1, textShadow: '0 0 30px rgba(78,198,198,0.3)' }}>
+        <div style={{ color: '#4EC6C6', fontSize: 42, fontWeight: 900, lineHeight: 1, letterSpacing: -1 }}>
           {initials}
         </div>
 
@@ -74,18 +82,13 @@ export function PassCardFront({ player, logoUrl, clubName, guardianPhone }: { pl
           {player.full_name}
         </div>
 
-        {/* Guardian phone */}
-        {guardianPhone && (
-          <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 8, marginTop: 3 }}>
-            Guardian: {guardianPhone}
-          </div>
-        )}
+        <GuardianBadge phone={guardianPhone} phone2={guardianPhone2}/>
       </div>
 
       {/* Player code — bottom left */}
       <div style={{ position: 'absolute', bottom: 12, left: 14 }}>
         <div style={{ color: 'rgba(255,255,255,0.15)', fontSize: 7, fontFamily: 'monospace', letterSpacing: 1 }}>
-          {player.player_code} · OPFC CONNECT
+          {player.player_code}
         </div>
       </div>
 
@@ -96,14 +99,13 @@ export function PassCardFront({ player, logoUrl, clubName, guardianPhone }: { pl
 }
 
 // Card Back — QR only
-export function PassCardBack({ player, qrUrl, guardianPhone }: { player: Player; qrUrl?: string; guardianPhone?: string }) {
+export function PassCardBack({ player, qrUrl, guardianPhone, guardianPhone2 }: { player: Player; qrUrl?: string; guardianPhone?: string; guardianPhone2?: string }) {
   return (
     <div style={{
       width: 340, height: 214,
       background: 'linear-gradient(145deg, #091520 0%, #0D1B2A 100%)',
       borderRadius: 14, border: '2px solid rgba(78,198,198,0.35)',
       position: 'relative', overflow: 'hidden', fontFamily: 'Arial, sans-serif',
-      boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
     }}>
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 4, background: 'linear-gradient(90deg, #4EC6C6, #2A8080)' }}/>
@@ -123,11 +125,7 @@ export function PassCardBack({ player, qrUrl, guardianPhone }: { player: Player;
         <div style={{ color: '#4EC6C6', fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 4 }}>Attendance Card</div>
         <div style={{ color: 'white', fontSize: 14, fontWeight: 800, textTransform: 'uppercase', lineHeight: 1.2 }}>{player.full_name}</div>
         <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 9, marginTop: 2, fontFamily: 'monospace' }}>{player.player_code}</div>
-        {guardianPhone && (
-          <div style={{ marginTop: 8, padding: '4px 10px', background: 'rgba(78,198,198,0.1)', border: '1px solid rgba(78,198,198,0.25)', borderRadius: 20, display: 'inline-block', width: 'fit-content' }}>
-            <span style={{ color: '#4EC6C6', fontSize: 9, fontWeight: 700 }}>Guardian: {guardianPhone}</span>
-          </div>
-        )}
+        <GuardianBadge phone={guardianPhone} phone2={guardianPhone2}/>
         <div style={{ marginTop: 12, color: 'rgba(255,255,255,0.15)', fontSize: 7 }}>Oasis Pailles Football Club</div>
         <div style={{ color: 'rgba(78,198,198,0.3)', fontSize: 6, fontStyle: 'italic' }}>Omnis Tactus, Officium</div>
       </div>
@@ -138,7 +136,7 @@ export function PassCardBack({ player, qrUrl, guardianPhone }: { player: Player;
 }
 
 // Full Pass Card with download
-export default function PassCard({ player, qrUrl, logoUrl, clubName, guardianPhone }: PassCardProps) {
+export default function PassCard({ player, qrUrl, logoUrl, clubName, guardianPhone, guardianPhone2 }: PassCardProps) {
   const frontRef = useRef<HTMLDivElement>(null)
   const backRef = useRef<HTMLDivElement>(null)
   const [downloading, setDownloading] = useState(false)
@@ -167,11 +165,11 @@ export default function PassCard({ player, qrUrl, logoUrl, clubName, guardianPho
     <div className="flex flex-col items-center gap-3">
       <div>
         <p className="section-title mb-2 text-center text-xs">FRONT</p>
-        <div ref={frontRef}><PassCardFront player={player} logoUrl={logoUrl} clubName={clubName} guardianPhone={guardianPhone}/></div>
+        <div ref={frontRef}><PassCardFront player={player} logoUrl={logoUrl} clubName={clubName} guardianPhone={guardianPhone} guardianPhone2={guardianPhone2}/></div>
       </div>
       <div>
         <p className="section-title mb-2 text-center text-xs">BACK (QR)</p>
-        <div ref={backRef}><PassCardBack player={player} qrUrl={qrUrl} guardianPhone={guardianPhone}/></div>
+        <div ref={backRef}><PassCardBack player={player} qrUrl={qrUrl} guardianPhone={guardianPhone} guardianPhone2={guardianPhone2}/></div>
       </div>
       <button onClick={downloadCard} disabled={downloading} className="btn-primary flex items-center gap-2 w-full justify-center">
         <Download size={15}/>{downloading ? 'Generating…' : 'Download Pass Card (Front + Back)'}

@@ -183,7 +183,8 @@ export default function PlayerDetailPage() {
         {/* Left: Pass Card (front + back PDF) */}
         <div className="flex flex-col items-center gap-4">
           <PassCard player={player} qrUrl={qrUrl} logoUrl={clubInfo.logo_url} clubName={clubInfo.name}
-            guardianPhone={(Array.isArray(player.guardian) ? player.guardian[0] : player.guardian)?.phone_primary}/>
+            guardianPhone={(Array.isArray(player.guardian) ? player.guardian[0] : player.guardian)?.phone_primary}
+            guardianPhone2={(Array.isArray(player.guardian) ? player.guardian[0] : player.guardian)?.phone_secondary}/>
         </div>
 
         {/* Middle: Info + Stats */}

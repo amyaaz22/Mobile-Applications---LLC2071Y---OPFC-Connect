@@ -50,11 +50,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid scanner token', success: false }, { status: 403 })
     }
 
-    // Get player
+    // Get player — inactive (archived) players must not be able to check in,
+    // whether their own QR still has a stale copy somewhere or someone is
+    // trying an old card.
     const { data: player } = await supabase
       .from('players')
       .select('id, full_name, player_code')
       .eq('id', player_id)
+      .eq('is_active', true)
       .single()
 
     if (!player) {

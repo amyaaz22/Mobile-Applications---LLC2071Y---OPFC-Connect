@@ -182,6 +182,12 @@ export default function PlayersPage() {
     fetchPlayers()
   }
 
+  // Cards per PDF file. A club-wide export can run into the hundreds of
+  // pages (2 pages per player) in a single jsPDF/html2canvas document, which
+  // gets slow to generate and heavy to open/print — split into batches of
+  // this size instead, each its own downloaded PDF.
+  const CARDS_PER_FILE = 50
+
   async function downloadAllCards() {
     const { data, error } = await supabase
       .from('players')
@@ -193,42 +199,55 @@ export default function PlayersPage() {
     const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
       import('html2canvas'), import('jspdf'),
     ])
-    const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [85.6, 54] })
 
-    setBulkProgress({ done: 0, total: data.length })
-    let first = true
+    const players = data as any[]
+    const batches: any[][] = []
+    for (let i = 0; i < players.length; i += CARDS_PER_FILE) batches.push(players.slice(i, i + CARDS_PER_FILE))
+    const multiFile = batches.length > 1
 
-    for (const p of data as any[]) {
-      const guardian = Array.isArray(p.guardian) ? p.guardian[0] : p.guardian
-      const qrUrl = await QRCode.toDataURL(`opfc://player/${p.id}`, {
-        color: { dark: '#4EC6C6', light: '#0D1B2A' }, width: 200, margin: 2,
-      })
-      setRenderPlayer(p)
-      setRenderQrUrl(qrUrl)
-      // Wait two frames so React has committed and the browser has painted
-      // the off-screen card before html2canvas captures it.
-      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+    setBulkProgress({ done: 0, total: players.length })
+    const dateStr = new Date().toISOString().split('T')[0]
 
-      const frontEl = document.getElementById('bulk-card-front')
-      const backEl = document.getElementById('bulk-card-back')
-      if (frontEl) {
-        const c = await html2canvas(frontEl, { scale: 2, backgroundColor: '#0D1B2A', useCORS: true })
-        if (!first) pdf.addPage()
-        pdf.addImage(c.toDataURL('image/png'), 'PNG', 0, 0, 85.6, 54)
-        first = false
+    for (let b = 0; b < batches.length; b++) {
+      const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [85.6, 54] })
+      let first = true
+
+      for (const p of batches[b]) {
+        const guardian = Array.isArray(p.guardian) ? p.guardian[0] : p.guardian
+        const qrUrl = await QRCode.toDataURL(`opfc://player/${p.id}`, {
+          color: { dark: '#4EC6C6', light: '#0D1B2A' }, width: 200, margin: 2,
+        })
+        setRenderPlayer(p)
+        setRenderQrUrl(qrUrl)
+        // Wait two frames so React has committed and the browser has painted
+        // the off-screen card before html2canvas captures it.
+        await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
+
+        const frontEl = document.getElementById('bulk-card-front')
+        const backEl = document.getElementById('bulk-card-back')
+        if (frontEl) {
+          const c = await html2canvas(frontEl, { scale: 2, backgroundColor: '#0D1B2A', useCORS: true })
+          if (!first) pdf.addPage()
+          pdf.addImage(c.toDataURL('image/png'), 'PNG', 0, 0, 85.6, 54)
+          first = false
+        }
+        if (backEl) {
+          const c = await html2canvas(backEl, { scale: 2, backgroundColor: '#091520', useCORS: true })
+          pdf.addPage()
+          pdf.addImage(c.toDataURL('image/png'), 'PNG', 0, 0, 85.6, 54)
+        }
+
+        setBulkProgress(prog => prog ? { done: prog.done + 1, total: prog.total } : prog)
       }
-      if (backEl) {
-        const c = await html2canvas(backEl, { scale: 2, backgroundColor: '#091520', useCORS: true })
-        pdf.addPage()
-        pdf.addImage(c.toDataURL('image/png'), 'PNG', 0, 0, 85.6, 54)
-      }
 
-      setBulkProgress(prog => prog ? { done: prog.done + 1, total: prog.total } : prog)
+      const suffix = multiFile ? `_part${b + 1}of${batches.length}` : ''
+      pdf.save(`OPFC_All_Player_Cards${suffix}_${dateStr}.pdf`)
     }
 
     setRenderPlayer(null)
-    pdf.save(`OPFC_All_Player_Cards_${new Date().toISOString().split('T')[0]}.pdf`)
-    toast.success(`${data.length} player cards downloaded`)
+    toast.success(multiFile
+      ? `${players.length} player cards downloaded across ${batches.length} PDFs`
+      : `${players.length} player cards downloaded`)
     setBulkProgress(null)
   }
 
@@ -449,9 +468,11 @@ export default function PlayersPage() {
         {renderPlayer && (
           <>
             <div id="bulk-card-front"><PassCardFront player={renderPlayer} logoUrl={clubInfo.logo_url} clubName={clubInfo.name}
-              guardianPhone={(Array.isArray(renderPlayer.guardian) ? renderPlayer.guardian[0] : renderPlayer.guardian)?.phone_primary}/></div>
+              guardianPhone={(Array.isArray(renderPlayer.guardian) ? renderPlayer.guardian[0] : renderPlayer.guardian)?.phone_primary}
+              guardianPhone2={(Array.isArray(renderPlayer.guardian) ? renderPlayer.guardian[0] : renderPlayer.guardian)?.phone_secondary}/></div>
             <div id="bulk-card-back"><PassCardBack player={renderPlayer} qrUrl={renderQrUrl}
-              guardianPhone={(Array.isArray(renderPlayer.guardian) ? renderPlayer.guardian[0] : renderPlayer.guardian)?.phone_primary}/></div>
+              guardianPhone={(Array.isArray(renderPlayer.guardian) ? renderPlayer.guardian[0] : renderPlayer.guardian)?.phone_primary}
+              guardianPhone2={(Array.isArray(renderPlayer.guardian) ? renderPlayer.guardian[0] : renderPlayer.guardian)?.phone_secondary}/></div>
           </>
         )}
       </div>
