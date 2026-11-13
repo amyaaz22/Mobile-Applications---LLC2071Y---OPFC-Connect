@@ -39,12 +39,13 @@ export async function POST(req: NextRequest) {
       if (roleError) {
         return NextResponse.json({
           success: true,
+          newId,
           warning: `Invite sent, but setting their role failed: ${roleError.message}. Use "Promote existing user" once they've confirmed their email.`,
         })
       }
     }
 
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: true, newId })
   } catch (e: any) {
     return NextResponse.json({ error: e.message ?? 'Invite failed' }, { status: 500 })
   }

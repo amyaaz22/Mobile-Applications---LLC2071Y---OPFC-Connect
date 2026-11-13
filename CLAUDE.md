@@ -20,7 +20,7 @@ Built for the club's daily operations AND as a Year 3 BSc dissertation project.
 - Push to GitHub main → Vercel auto-deploys (takes ~1 min)
 - Always run `npm run build` locally before pushing to catch errors
 - Environment variables are set in Vercel dashboard (NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY)
-- **Before this deploys correctly, run `schema_v3_additions.sql` through `schema_v15_additions.sql` in the Supabase SQL Editor**, in order (all additive — safe on the live DB, and all already applied on the live project as of this writing). v3 adds expenses/income/inventory tables, fixes a profile role-escalation hole, widens payments.type, converts point_rules/global_awards category columns to arrays. v4 frees players.position / announcements.tag / inventory_items.condition from their old CHECK constraints (Club Settings → Dropdown Lists now owns those lists), seeds the new dropdown-list keys, and adds profiles.permissions for granular admin access. v5 adds the field_sheets table (Field Sheets feature). v6 adds payments.reference (optional transaction ref), income.receipt_url, a private `receipts` storage bucket for expense/income attachments, and seeds categories/fees/club_info if missing. v7 adds the `audit_log` table (Super Admin panel's Activity Log). v8 adds income.donor_profile_id (optional link from a donation to the parent who made it, for the Statement of Account). v9 extends `handle_new_user` to also log new signups into `audit_log` (self-registration doesn't go through the app's own `logAudit()`). v10 adds `players.enrollment_status` ('trial'|'active') for the trial-session onboarding flow. v11 fixes two production bugs found in a code audit: `protect_profile_role` was keyed on `auth.uid()`, which is NULL for service-role requests — this silently reverted the role/permissions set by `/api/staff/invite` (a service-role route) back to the trigger's "no admin found, keep old value" branch, so every invited coach landed back on the default `parent` role until manually promoted again; the trigger now also allows `auth.role() = 'service_role'` through. It also adds the missing `income` RLS SELECT policy for `donor_profile_id = auth.uid()` — without it, a parent's Statement of Account silently showed Rs 0 in donations with no error, because the only existing `income` policy was the admin/coach "manage all" one. v12 promotes `assigned_categories`/`permissions` from a UI-level convenience to a real RLS boundary — see RBAC notes below for the design and its two SQL helper functions (`has_area_permission`, `in_category_scope`). v13 adds `player_applications`/`player_application_children` (public self-service registration — see "Player Registration" below) with public insert-only RLS and coach-read/coach-write policies gated by the new `registrations` permission area. v14 adds the Drill Library (phase 1 — see "Drill Library" below): `drills`, plus `training_materials`/`material_chunks` for a future AI-assisted extraction phase, all gated by the new `drill_library` permission area; read stays broad for any coach/admin, writes require the area. v15 adds `session_drills` (Session Plan — assigning Drill Library entries to a specific training session, in order), gated by the `sessions` permission area, not `drill_library`, since assigning is part of session planning done from the session detail page.
+- **Before this deploys correctly, run `schema_v3_additions.sql` through `schema_v16_additions.sql` in the Supabase SQL Editor**, in order (all additive — safe on the live DB, and all already applied on the live project as of this writing). v3 adds expenses/income/inventory tables, fixes a profile role-escalation hole, widens payments.type, converts point_rules/global_awards category columns to arrays. v4 frees players.position / announcements.tag / inventory_items.condition from their old CHECK constraints (Club Settings → Dropdown Lists now owns those lists), seeds the new dropdown-list keys, and adds profiles.permissions for granular admin access. v5 adds the field_sheets table (Field Sheets feature). v6 adds payments.reference (optional transaction ref), income.receipt_url, a private `receipts` storage bucket for expense/income attachments, and seeds categories/fees/club_info if missing. v7 adds the `audit_log` table (Super Admin panel's Activity Log). v8 adds income.donor_profile_id (optional link from a donation to the parent who made it, for the Statement of Account). v9 extends `handle_new_user` to also log new signups into `audit_log` (self-registration doesn't go through the app's own `logAudit()`). v10 adds `players.enrollment_status` ('trial'|'active') for the trial-session onboarding flow. v11 fixes two production bugs found in a code audit: `protect_profile_role` was keyed on `auth.uid()`, which is NULL for service-role requests — this silently reverted the role/permissions set by `/api/staff/invite` (a service-role route) back to the trigger's "no admin found, keep old value" branch, so every invited coach landed back on the default `parent` role until manually promoted again; the trigger now also allows `auth.role() = 'service_role'` through. It also adds the missing `income` RLS SELECT policy for `donor_profile_id = auth.uid()` — without it, a parent's Statement of Account silently showed Rs 0 in donations with no error, because the only existing `income` policy was the admin/coach "manage all" one. v12 promotes `assigned_categories`/`permissions` from a UI-level convenience to a real RLS boundary — see RBAC notes below for the design and its two SQL helper functions (`has_area_permission`, `in_category_scope`). v13 adds `player_applications`/`player_application_children` (public self-service registration — see "Player Registration" below) with public insert-only RLS and coach-read/coach-write policies gated by the new `registrations` permission area. v14 adds the Drill Library (phase 1 — see "Drill Library" below): `drills`, plus `training_materials`/`material_chunks` for a future AI-assisted extraction phase, all gated by the new `drill_library` permission area; read stays broad for any coach/admin, writes require the area. v15 adds `session_drills` (Session Plan — assigning Drill Library entries to a specific training session, in order), gated by the `sessions` permission area, not `drill_library`, since assigning is part of session planning done from the session detail page. v16 adds the `registration_window_open()`/`registration_window_status()` helper functions (an optional opens_at/closes_at window on a public form, enforced at the RLS layer, not just hidden client-side — see "Registration Windows" below), tightens `player_applications`/`player_application_children`'s public-insert policies to require the window, and adds `coach_applications` (public self-service "apply to coach" — see "Coach Applications" below) with the same window-gated public-insert pattern.
 - Coach/parent invites (Staff & Parents page) send real emails via Supabase Auth — needs an email provider configured in the Supabase project (default Supabase SMTP is rate-limited; for real usage swap in a custom SMTP provider under Auth settings)
 
 ---
@@ -86,7 +86,8 @@ Built for the club's daily operations AND as a Year 3 BSc dissertation project.
 src/
   app/
     (auth)/login, register, forgot-password
-    apply/                 — Public, no-login player registration form (see "Player Registration" below) — replaces the club's old Google Form
+    apply/                 — Public, no-login player registration form (see "Player Registration" below) — replaces the club's old Google Form. Gated by the player_registration window (see "Registration Windows" below)
+    apply/coach/            — Public, no-login coach application form (see "Coach Applications" below). Gated by the coach_registration window
     coach/
       page.tsx              — Dashboard
       players/page.tsx      — Player list, category filter, Excel export, "Download All Cards" (bulk PDF), "Trial" badge for trial players
@@ -109,9 +110,9 @@ src/
       income/               — Donations / sponsorships / fundraising income
       expenses/             — Club expenses (referee fees, transport, equipment, …)
       inventory/            — Kit/equipment tracking, low-stock alerts
-      staff/                — Admin-only: invite/promote coaches, manage parent contacts, granular permission chips per coach/admin, "Export Contacts" (.vcf) for bulk-importing parent numbers into coaching staff phones
+      staff/                — Admin-only: invite/promote coaches, manage parent contacts, granular permission chips per coach/admin, "Export Contacts" (.vcf) for bulk-importing parent numbers into coaching staff phones, Applications tab (area 'staff') to review/approve/reject public /apply/coach submissions — see "Coach Applications" below
       announcements/        — Post/delete announcements
-      settings/             — Club settings (logo, categories, fees) + Dropdown Lists (positions, guardian relationships, announcement tags, payment methods, expense/income/inventory categories, inventory conditions — every dropdown in the app that used to be hardcoded)
+      settings/             — Club settings (logo, categories, fees) + Public Registration Links (opens_at/closes_at window for /apply and /apply/coach, see "Registration Windows" below) + Dropdown Lists (positions, guardian relationships, announcement tags, payment methods, expense/income/inventory categories, inventory conditions — every dropdown in the app that used to be hardcoded)
       admin/                — Super Admin panel (area 'system', admin-only): Accounts tab (every profile + last sign-in/email-confirmed from Supabase Auth) + Activity Log tab (audit_log, filterable by entity)
       profile/              — Coach profile
     parent/
@@ -136,6 +137,7 @@ src/
       staff/invite/         — Admin-only: service-role invite (creates auth user + sets role)
       admin/users/           — area 'system'-only: service-role account list (profiles + Supabase Auth last_sign_in_at/email_confirmed_at)
   components/
+    RegistrationGate.tsx    — useRegistrationWindow() hook + RegistrationClosedNotice — shared by /apply and /apply/coach to check/display the registration_window_status() RPC result, see "Registration Windows" below
     Leaderboard.tsx         — Shared leaderboard (used by coach/parent/player pages)
     ReceiptLink.tsx         — Opens an expense/income receipt via a short-lived signed URL (private `receipts` bucket)
     layout/
@@ -189,6 +191,7 @@ supabase/
   schema_v13_additions.sql  — Additive migration: player_applications/player_application_children tables for public self-service registration — public insert-only RLS (no SELECT for anon/authenticated), coach/admin read+write gated by the new `registrations` permission area (run AFTER v12; see "Player Registration" below)
   schema_v14_additions.sql  — Additive migration: Drill Library phase 1 — drills, training_materials, material_chunks tables, all gated by the new `drill_library` permission area (run AFTER v13; see "Drill Library" below)
   schema_v15_additions.sql  — Additive migration: session_drills — assigns Drill Library entries to a specific training session, in order (Session Plan), gated by the `sessions` permission area (run AFTER v14; see "Drill Library" below)
+  schema_v16_additions.sql  — Additive migration: registration_window_open()/registration_window_status() helpers (opens_at/closes_at window on a public form, enforced via RLS), tightens player_applications/player_application_children's public-insert policies to require the window, and adds coach_applications (public self-service "apply to coach") with the same pattern (run AFTER v15; see "Registration Windows" and "Coach Applications" below)
 ```
 
 ---
@@ -207,15 +210,16 @@ supabase/
 | `income` | Donations, sponsorships, fundraising — anything that isn't a player fee. Same optional `receipt_url` convention as `expenses`. `donor_profile_id` (v8, optional) links a donation to the parent's account so it shows on their Statement of Account — set via a select in the Record Income form when a parent profile exists. RLS: admin/coach have full access, and (since v11) a parent can `select` their own linked donations via `donor_profile_id = auth.uid()` |
 | `inventory_items` | Kit/equipment: quantity, condition, `min_stock` drives the low-stock flag, optional `assigned_to` player |
 | `announcements` | Club-wide messages |
-| `club_settings` | Dynamic config: categories (plain string array, e.g. `["U9","U13"]` — never `{name: ...}` objects), fees, club_info (logo_url) |
+| `club_settings` | Dynamic config: categories (plain string array, e.g. `["U9","U13"]` — never `{name: ...}` objects), fees, club_info (logo_url), `player_registration`/`coach_registration` (v16, `{opens_at, closes_at}` ISO timestamps or null — see "Registration Windows" below) |
 | `point_rules` | Definable point-earning rules. `category` is `text[]` — always an array, e.g. `['All']` or `['U9','U13']` |
 | `player_points` | Individual point awards — rule-based or one-off (`rule_id` null, `note` holds the reason) |
 | `global_awards` | Club-wide point events. `target_category` is `text[]`, same convention as `point_rules.category` |
 | `fan_card` | Parent-customisable card data |
 | `field_sheets` | On-field drill worksheets. `columns` (jsonb `[{key,label}]`) + `player_ids` (uuid[], ordered) define the grid; `data` (jsonb, `{player_id: {col_key: value}}`) holds the filled-in cells — one row per sheet, not a normalized cell table |
 | `audit_log` | Append-only activity trail for the Super Admin panel. `actor_id`/`actor_name`/`actor_role`, `action` (create/update/delete/invite/promote/demote/award), `entity` (…/`account` for new signups, logged directly by the `handle_new_user` trigger since self-registration never goes through the app's `logAudit()`) + `entity_id`, human-readable `summary`, optional `metadata` jsonb. Admin-only read via RLS; any coach/admin (or the trigger, running as a security-definer function) can insert |
-| `player_applications` | Guardian info from a public `/apply` submission (guardian_name, relationship, phone_primary/secondary, email, address_line1/2). One row per household submission, covering however many children were added. RLS: public insert (`with check (true)`, no `TO` clause — anon and authenticated both), SELECT/write restricted to admin/coach — see "Player Registration" below |
+| `player_applications` | Guardian info from a public `/apply` submission (guardian_name, relationship, phone_primary/secondary, email, address_line1/2). One row per household submission, covering however many children were added. RLS: public insert gated by the `player_registration` window (v16, see "Registration Windows" below), SELECT/write restricted to admin/coach — see "Player Registration" below |
 | `player_application_children` | One row per child on a `player_applications` submission (full_name, date_of_birth, school_grade, medical_conditions, takes_medication, `status` pending/approved/rejected, `resolved_player_id` once approved, `reviewed_by`/`reviewed_at`/`review_note`). Same public-insert RLS shape as `player_applications`; UPDATE/DELETE gated by the `registrations` permission area |
+| `coach_applications` | A public `/apply/coach` submission (full_name, email, phone, date_of_birth, address, categories_interested text[], qualifications, experience, availability, motivation, `status` pending/approved/rejected, `reviewed_by`/`reviewed_at`/`review_note`, `resolved_profile_id` once approved). RLS: public insert gated by the `coach_registration` window (v16); SELECT/UPDATE/DELETE gated by the `staff` permission area, not read-broad like `player_applications` — see "Coach Applications" below |
 | `drills` | Drill Library (v14): name, `categories`/`tags` (text[], same array convention as `point_rules.category`), `game_format` (Dropdown-List key `drill_game_formats`), `team_setup` (jsonb, freeform shape — not yet surfaced in the UI, reserved for the extraction phase), min/max players, duration, equipment, field_dimensions, description/setup_instructions/coaching_points, `source_material_id`/`source_page_range` (provenance once extraction lands), `status` draft/published (manual entries publish immediately; extraction will land as draft for review). Read: any coach/admin. Write: `drill_library` permission area |
 | `training_materials` | Drill Library (v14): one row per source PDF for the planned extraction phase — title, total_pages, `status` pending/processing/done, processed_pages. Nothing writes to this yet (phase 1 ships the schema only) |
 | `session_drills` | Join table (v15) assigning `drills` to a specific `training_sessions` row — the Session Plan a coach builds on the session detail page. `sort_order` (int) is the plan order (reorderable via up/down arrows); `unique(session_id, drill_id)` so the same drill can't be added twice to one session. Read: any coach/admin. Write: `sessions` permission area (not `drill_library` — assigning happens from session planning, same split as attendance writes being gated by `sessions`) |
@@ -224,6 +228,27 @@ supabase/
 ---
 
 ## Current Known Issues / TODO
+Most recent round: Registration Windows + Coach Applications (schema v16 —
+see those sections above for the full design). Built in direct response to
+the club wanting control over `/apply` being open to spam at all times, plus
+wanting the same kind of controlled, reviewed intake for new coaches that
+`/apply` already gives players. Caught and fixed a real bug in the new
+`/apply/coach` form during verification: an empty (optional) Date of Birth
+field was submitted as `''` rather than `null`, which Postgres rejects for
+a `date` column (`invalid input syntax for type date`) — every submission
+that left DOB blank would have silently failed with a generic "could not
+submit" toast. Verified end-to-end against production via Playwright
+(anonymous submission → window-open and window-closed RLS behavior,
+confirmed via both the UI and direct impersonation queries → appears
+correctly in Staff & Parents → Applications). One piece was reviewed but
+not exercised live: clicking **Approve & Invite** itself was blocked by
+the session's own auto-mode safety classifier (creating a real Supabase
+Auth user + sending a real invite email is a production side effect it
+flags as destructive) — its code is a direct structural match to
+`InviteModal.send()`'s already-proven call to the same `/api/staff/invite`
+endpoint, so it's reviewed-confident rather than click-tested; flag this
+to the user if a live test of that one button specifically is wanted.
+
 Fixed a real mobile-usability bug (reported directly by the club):
 `MobileNav.tsx` hardcoded its own short nav list (4-5 items) completely
 independent of `Sidebar.tsx`'s full list, and silently fell behind every
@@ -427,7 +452,98 @@ schema v13.
   all. Keep this in mind for any other public-insert table added later.
 - No CAPTCHA or rate-limiting on `/apply` — same trust model the old Google
   Form had (anyone with the link can submit; a coach vets everything before
-  it becomes a real player).
+  it becomes a real player). Mitigated somewhat by the Registration Window
+  below — an admin can close the link entirely outside active recruitment
+  periods, cutting the window spam actually has to land in.
+
+---
+
+## Registration Windows
+Both public self-service forms (`/apply` for players, `/apply/coach` for
+coaches) can be scheduled open/closed from **Club Settings → Public
+Registration Links** (area `settings`) — an optional `opens_at`/`closes_at`
+pair per form, stored in `club_settings` under the keys `player_registration`
+and `coach_registration` (schema v16). Added directly in response to the
+club's concern that `/apply` sat open to the public at all times with no way
+to stop it being hit (spam or otherwise) outside an actual recruitment push.
+
+- **Enforced server-side, not just hidden in the UI.** The window check
+  (`public.registration_window_open(p_key)`, a SECURITY DEFINER SQL
+  function) is baked directly into `player_applications`/
+  `player_application_children`/`coach_applications`'s public INSERT RLS
+  policies — a closed window rejects the insert at the database level, so a
+  scripted submission that bypasses the form entirely (curl, a bot hitting
+  the REST API directly) is blocked exactly the same as one through the UI.
+  This was the whole point of building it this way rather than just an
+  `if (closed) hide the form` client-side check, which would do nothing
+  against anything that isn't a browser loading the page.
+- **No row configured for a key = unrestricted (open).** This is what kept
+  `/apply` working exactly as it always had when v16 shipped — the window
+  only starts restricting once an admin actually sets one from Settings.
+  Either bound can be left blank for "no limit on that side" (e.g. only a
+  `closes_at` with no `opens_at` = open now, closes on schedule).
+- **`registration_window_status(p_key)`** is the read-side counterpart — a
+  second SECURITY DEFINER function, grantable to `anon`, that returns
+  `{open, opens_at, closes_at}` without exposing the rest of `club_settings`
+  (whose own SELECT policy is `auth.uid() is not null`, i.e. NOT
+  anon-readable — fees/categories/etc. aren't meant to be public). Both
+  `/apply` and `/apply/coach` call it via `useRegistrationWindow()`
+  (`src/components/RegistrationGate.tsx`) to show the real form when open,
+  or a `RegistrationClosedNotice` (with the actual opens-on/closed-on date
+  when one's configured) instead of a dead form when not.
+- **"Close now"** on each card in Settings sets that form's `closes_at` to
+  the current moment — the fast kill-switch for "stop accepting submissions
+  immediately" without having to think in UTC or pick a date.
+- Validated directly against production: RLS-impersonation queries
+  (`set local role anon`, wrapped in `begin`/`rollback`) confirmed an
+  anonymous insert is accepted with the window open and rejected
+  (`insufficient_privilege`) with it closed, before this was considered
+  done — not just read from the policy source.
+
+---
+
+## Coach Applications
+`/apply/coach` is a public, unauthenticated, top-level form (same shape as
+`/apply`, not inside any Guard) where a prospective coach submits their own
+contact info, coaching interest/categories, qualifications, experience,
+availability, and motivation. Replaces word-of-mouth/ad-hoc recruitment with
+the same "submit → staff reviews → approve or reject" pattern `/apply`
+already established for players — added together with Registration Windows
+above in direct response to wanting the same kind of control over this new
+form from day one, not retrofitted later.
+- Submissions land in `coach_applications` (schema v16) — **not** directly
+  as a `profiles` row. A `staff`-permitted admin reviews from **Staff &
+  Parents → Applications** (`/coach/staff`, a new tab alongside
+  Coaches/Parents) and either rejects it (optional reason, same UX as
+  rejecting a player registration) or **Approve & Invite**s it.
+- **Approving doesn't create the account from this table's own logic** — it
+  calls the *existing* `/api/staff/invite` route (the same endpoint "Invite
+  Coach" on the same page already uses) with the applicant's name/email and
+  `role: 'coach'`, so there's exactly one code path in the app that actually
+  creates a coach auth user + sets its role, not two copies to keep in sync
+  (this is the same reasoning schema v11 and the RBAC notes document for why
+  `/api/staff/invite` itself is careful about service-role vs. client
+  writes). The application row is then updated to `status='approved'` with
+  `resolved_profile_id` set to the new account's id, and logged via
+  `logAudit()`. The invited coach starts with unrestricted default
+  permissions, same as any other invite — narrow their access afterward
+  from the Coaches tab same as usual.
+- **Read is scoped to `staff`, not read-broad like `player_applications`.**
+  This is a deliberate deviation from the "read stays broad for any
+  coach/admin" convention the RBAC notes establish for `player_applications`
+  — a prospective hire's personal contact/availability info has no reason to
+  be visible to a coach who isn't involved in the actual hiring decision,
+  unlike a player registration which is informational to the whole
+  coaching staff. SELECT, UPDATE, and DELETE on `coach_applications` all
+  require `has_area_permission('staff')`.
+- Same RETURNING gotcha as `/apply` applies here (see "Player Registration"
+  above) — `/apply/coach/page.tsx` generates its own id with
+  `crypto.randomUUID()` and inserts with a plain `.insert(x)`, never
+  `.select()`, since an anonymous submitter has no SELECT access on
+  `coach_applications` and Postgres still evaluates that policy for an
+  INSERT's implicit RETURNING.
+- Gated by the `coach_registration` window exactly like `/apply` is gated
+  by `player_registration` — see "Registration Windows" above.
 
 ---
 

@@ -6,7 +6,9 @@ import { toast } from 'react-hot-toast'
 import {
   Plus, Trash2, Download, Upload, Mail, Search, X,
   ShieldCheck, Users2, UserMinus, UserPlus, Contact,
+  ClipboardList, CheckCircle2, XCircle, Phone as PhoneIcon,
 } from 'lucide-react'
+import { formatDate } from '@/lib/utils'
 import * as XLSX from 'xlsx'
 import { PERMISSION_AREAS, hasPermission } from '@/lib/permissions'
 import { logAudit } from '@/lib/audit'
@@ -71,13 +73,19 @@ export default function StaffPage() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [viewerId, setViewerId] = useState('')
   const [viewerIsFullAdmin, setViewerIsFullAdmin] = useState(false)
-  const [tab, setTab] = useState<'coaches' | 'parents'>('coaches')
+  const [tab, setTab] = useState<'coaches' | 'parents' | 'applications'>('coaches')
   const [loading, setLoading] = useState(true)
 
   const [coaches, setCoaches] = useState<any[]>([])
   const [guardians, setGuardians] = useState<any[]>([])
   const [categories, setCategories] = useState<string[]>([])
   const [inviteRole, setInviteRole] = useState<'coach' | 'parent' | null>(null)
+
+  const [coachApps, setCoachApps] = useState<any[]>([])
+  const [appsTab, setAppsTab] = useState<'pending' | 'approved' | 'rejected'>('pending')
+  const [approvingId, setApprovingId] = useState<string | null>(null)
+  const [rejectingAppId, setRejectingAppId] = useState<string | null>(null)
+  const [rejectAppNote, setRejectAppNote] = useState('')
 
   const [promoteSearch, setPromoteSearch] = useState('')
   const [promoteResults, setPromoteResults] = useState<any[]>([])
@@ -102,15 +110,73 @@ export default function StaffPage() {
 
   async function loadAll() {
     setLoading(true)
-    const [{ data: c }, { data: g }, { data: cats }] = await Promise.all([
+    const [{ data: c }, { data: g }, { data: cats }, { data: apps }] = await Promise.all([
       supabase.from('profiles').select('*').in('role', ['admin', 'coach']).order('full_name'),
       supabase.from('guardians').select('*, player:players(full_name, player_code)').order('full_name'),
       supabase.from('club_settings').select('value').eq('key', 'categories').single(),
+      supabase.from('coach_applications').select('*').order('submitted_at', { ascending: false }),
     ])
     setCoaches(c ?? [])
     setGuardians(g ?? [])
     setCategories((cats?.value as string[]) ?? [])
+    setCoachApps(apps ?? [])
     setLoading(false)
+  }
+
+  // Approving doesn't create the account itself — it drives the same
+  // /api/staff/invite route "Invite Coach" already uses, so there's one
+  // place (not two) that actually creates a coach auth user + sets its
+  // role. The application row just records the decision + links the
+  // resulting profile once the invite succeeds.
+  async function approveApplication(app: any) {
+    setApprovingId(app.id)
+    const res = await fetch('/api/staff/invite', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: app.email, full_name: app.full_name, role: 'coach' }),
+    })
+    const data = await res.json()
+    if (!res.ok) {
+      toast.error(data.error ?? 'Invite failed')
+      setApprovingId(null)
+      return
+    }
+    const { data: { user } } = await supabase.auth.getUser()
+    await supabase.from('coach_applications').update({
+      status: 'approved', reviewed_by: user?.id ?? null, reviewed_at: new Date().toISOString(),
+      resolved_profile_id: data.newId ?? null,
+    }).eq('id', app.id)
+    logAudit(supabase, {
+      action: 'invite', entity: 'staff', entity_id: data.newId,
+      summary: `Approved coach application → invited ${app.full_name} (${app.email})`,
+    })
+    if (data.warning) toast.error(data.warning, { duration: 8000 })
+    else toast.success(`${app.full_name} approved and invited!`)
+    setApprovingId(null)
+    loadAll()
+  }
+
+  async function rejectApplication(app: any) {
+    const { data: { user } } = await supabase.auth.getUser()
+    await supabase.from('coach_applications').update({
+      status: 'rejected', reviewed_by: user?.id ?? null, reviewed_at: new Date().toISOString(),
+      review_note: rejectAppNote || null,
+    }).eq('id', app.id)
+    logAudit(supabase, {
+      action: 'update', entity: 'staff', entity_id: app.id,
+      summary: `Rejected coach application: ${app.full_name}${rejectAppNote ? ' — ' + rejectAppNote : ''}`,
+    })
+    toast.success('Application rejected')
+    setRejectingAppId(null)
+    setRejectAppNote('')
+    loadAll()
+  }
+
+  async function deleteApplication(app: any) {
+    if (!confirm(`Permanently delete ${app.full_name}'s application? This can't be undone.`)) return
+    await supabase.from('coach_applications').delete().eq('id', app.id)
+    toast.success('Deleted')
+    loadAll()
   }
 
   async function searchPromotable() {
@@ -351,6 +417,11 @@ export default function StaffPage() {
             ${tab === 'parents' ? 'bg-teal-400/10 border-teal-400/30 text-teal-400' : 'border-white/10 text-white/50 hover:text-white'}`}>
           <UserPlus size={14}/> Parents ({guardians.length})
         </button>
+        <button onClick={() => setTab('applications')}
+          className={`px-4 py-2 rounded-xl text-sm font-semibold border transition-all flex items-center gap-2
+            ${tab === 'applications' ? 'bg-teal-400/10 border-teal-400/30 text-teal-400' : 'border-white/10 text-white/50 hover:text-white'}`}>
+          <ClipboardList size={14}/> Applications {coachApps.filter(a => a.status === 'pending').length > 0 ? `(${coachApps.filter(a => a.status === 'pending').length})` : ''}
+        </button>
       </div>
 
       {tab === 'coaches' ? (
@@ -499,7 +570,7 @@ export default function StaffPage() {
             </div>
           )}
         </>
-      ) : (
+      ) : tab === 'parents' ? (
         <>
           <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
             <div className="relative flex-1 max-w-xs">
@@ -568,6 +639,88 @@ export default function StaffPage() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+        </>
+      ) : (
+        <>
+          <p className="text-white/30 text-xs mb-4">
+            Submitted via the public application form at <span className="text-teal-400">/apply/coach</span> — approving sends the same invite as "Invite Coach" above.
+          </p>
+          <div className="flex gap-2 mb-5">
+            {(['pending', 'approved', 'rejected'] as const).map(t => (
+              <button key={t} onClick={() => setAppsTab(t)}
+                className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold text-center border transition-all capitalize
+                  ${appsTab === t ? 'bg-teal-400/10 border-teal-400/30 text-teal-400' : 'border-white/10 text-white/40 hover:text-white/70'}`}>
+                {t}{t === 'pending' && coachApps.filter(a => a.status === 'pending').length > 0 ? ` (${coachApps.filter(a => a.status === 'pending').length})` : ''}
+              </button>
+            ))}
+          </div>
+
+          {loading ? (
+            <div className="flex items-center justify-center py-12 text-white/30 gap-3">
+              <div className="animate-spin w-6 h-6 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>Loading…
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {coachApps.filter(a => a.status === appsTab).length === 0 && (
+                <div className="card p-8 text-center text-white/30">No {appsTab} applications.</div>
+              )}
+              {coachApps.filter(a => a.status === appsTab).map(app => (
+                <div key={app.id} className="card p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-white font-semibold text-sm">{app.full_name}</p>
+                      <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs text-white/40">
+                        <span className="flex items-center gap-1"><PhoneIcon size={12}/> {app.phone}</span>
+                        <span className="flex items-center gap-1"><Mail size={12}/> {app.email}</span>
+                        {app.address && <span>{app.address}</span>}
+                      </div>
+                      {app.categories_interested?.length > 0 && (
+                        <div className="flex gap-1.5 flex-wrap mt-2">
+                          {app.categories_interested.map((c: string) => (
+                            <span key={c} className="badge bg-white/5 text-white/50 border-white/10 text-[10px] py-0">{c}</span>
+                          ))}
+                        </div>
+                      )}
+                      {app.qualifications && <p className="text-white/50 text-xs mt-2"><span className="text-white/30">Qualifications:</span> {app.qualifications}</p>}
+                      {app.experience && <p className="text-white/50 text-xs mt-1"><span className="text-white/30">Experience:</span> {app.experience}</p>}
+                      {app.availability && <p className="text-white/50 text-xs mt-1"><span className="text-white/30">Availability:</span> {app.availability}</p>}
+                      {app.motivation && <p className="text-white/50 text-xs mt-1"><span className="text-white/30">Motivation:</span> {app.motivation}</p>}
+                      {appsTab === 'rejected' && app.review_note && <p className="text-red-300/70 text-xs mt-2">Reason: {app.review_note}</p>}
+                    </div>
+                    <span className="text-white/20 text-xs flex-shrink-0">{formatDate(app.submitted_at)}</span>
+                  </div>
+
+                  {appsTab === 'pending' && (
+                    rejectingAppId === app.id ? (
+                      <div className="space-y-2 pt-3 mt-3 border-t border-white/5">
+                        <input className="input py-2 text-sm" placeholder="Reason (optional)"
+                          value={rejectAppNote} onChange={e => setRejectAppNote(e.target.value)}/>
+                        <div className="flex gap-2">
+                          <button type="button" onClick={() => setRejectingAppId(null)} className="btn-secondary flex-1 py-2 text-xs">Cancel</button>
+                          <button type="button" onClick={() => rejectApplication(app)} className="btn-danger flex-1 py-2 text-xs">Confirm Rejection</button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex gap-2 pt-3 mt-3 border-t border-white/5">
+                        <button type="button" onClick={() => { setRejectingAppId(app.id); setRejectAppNote('') }}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium rounded-xl border border-red-500/20 text-red-400 hover:bg-red-500/10 transition-all">
+                          <XCircle size={14}/> Reject
+                        </button>
+                        <button type="button" onClick={() => approveApplication(app)} disabled={approvingId === app.id}
+                          className="flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-medium rounded-xl bg-teal-400 text-[#0D1B2A] hover:bg-teal-300 transition-all disabled:opacity-50">
+                          <CheckCircle2 size={14}/> {approvingId === app.id ? 'Approving…' : 'Approve & Invite'}
+                        </button>
+                        <button type="button" onClick={() => deleteApplication(app)} title="Delete"
+                          className="p-2 rounded-lg text-white/30 hover:text-red-400 hover:bg-red-400/10 transition-all">
+                          <Trash2 size={15}/>
+                        </button>
+                      </div>
+                    )
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </>

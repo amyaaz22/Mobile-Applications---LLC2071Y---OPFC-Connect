@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/client'
 import { toast } from 'react-hot-toast'
 import Link from 'next/link'
 import { ArrowLeft, CheckCircle, Plus, X, Users } from 'lucide-react'
+import { useRegistrationWindow, RegistrationClosedNotice } from '@/components/RegistrationGate'
 
 // Public, unauthenticated self-service registration — replaces the club's
 // Google Form. A guardian fills their own contact info once, then adds one
@@ -29,6 +30,7 @@ function emptyChild(): ChildDraft {
 
 export default function ApplyPage() {
   const supabase = createClient()
+  const windowStatus = useRegistrationWindow('player_registration')
   const [submitting, setSubmitting] = useState(false)
   const [done, setDone] = useState(false)
   const [guardian, setGuardian] = useState({
@@ -72,6 +74,13 @@ export default function ApplyPage() {
     setDone(true)
     setSubmitting(false)
   }
+
+  if (windowStatus === null) return (
+    <div className="min-h-screen flex items-center justify-center" style={{ background: '#0D1B2A' }}>
+      <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full"/>
+    </div>
+  )
+  if (!windowStatus.open) return <RegistrationClosedNotice status={windowStatus} title="Registration isn't open right now"/>
 
   if (done) return (
     <div className="min-h-screen flex items-center justify-center p-4" style={{ background: '#0D1B2A' }}>

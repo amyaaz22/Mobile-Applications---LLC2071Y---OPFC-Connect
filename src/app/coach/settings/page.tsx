@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'react-hot-toast'
-import { Save, Upload, ChevronDown } from 'lucide-react'
+import { Save, Upload, ChevronDown, Link2, Clock } from 'lucide-react'
 import ListEditor from '@/components/ListEditor'
 import { usePermissionGuard } from '@/hooks/usePermissionGuard'
 import { logAudit } from '@/lib/audit'
@@ -29,6 +29,77 @@ const LIST_LABELS: Record<string, { title: string; hint: string }> = {
   inventory_categories: { title: 'Inventory Categories', hint: 'Used when adding an inventory item.' },
   inventory_conditions: { title: 'Inventory Conditions', hint: 'Used when adding or editing an inventory item.' },
   drill_game_formats: { title: 'Drill Game Formats', hint: 'Used when adding a drill to the Drill Library.' },
+}
+
+// <input type="datetime-local"> works in local wall-clock time with no
+// timezone info; club_settings stores ISO (UTC) strings so the
+// registration_window_open() SQL function can compare them against
+// `now()` directly. These two convert between the two without the
+// off-by-timezone bugs of doing it inline at every call site.
+function isoToLocalInput(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+function localInputToIso(local: string): string | null {
+  if (!local) return null
+  return new Date(local).toISOString()
+}
+
+type RegWindow = { opens_at: string; closes_at: string } // datetime-local strings, '' = no bound
+
+function windowStatusLabel(w: RegWindow): { text: string; cls: string } {
+  const now = new Date()
+  const opens = w.opens_at ? new Date(w.opens_at) : null
+  const closes = w.closes_at ? new Date(w.closes_at) : null
+  if (opens && opens > now) return { text: 'Not yet open', cls: 'bg-white/5 text-white/40 border-white/10' }
+  if (closes && closes < now) return { text: 'Closed', cls: 'bg-red-500/15 text-red-300 border-red-500/25' }
+  return { text: 'Open', cls: 'bg-green-500/15 text-green-300 border-green-500/25' }
+}
+
+function RegistrationWindowCard({
+  title, hint, path, value, onChange,
+}: {
+  title: string; hint: string; path: string; value: RegWindow; onChange: (w: RegWindow) => void
+}) {
+  const status = windowStatusLabel(value)
+  const linkUrl = typeof window !== 'undefined' ? `${window.location.origin}${path}` : path
+  return (
+    <div className="card p-5 mb-3">
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div>
+          <h3 className="text-white font-bold text-sm flex items-center gap-2">
+            <Link2 size={14} className="text-teal-400"/>{title}
+          </h3>
+          <p className="text-white/30 text-xs mt-0.5">{hint}</p>
+        </div>
+        <span className={`badge text-xs flex-shrink-0 ${status.cls}`}>{status.text}</span>
+      </div>
+      <a href={path} target="_blank" rel="noopener noreferrer" className="text-teal-400/70 hover:text-teal-400 text-xs font-mono block mb-4 truncate">
+        {linkUrl}
+      </a>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <label className="label mb-1.5 block">Opens</label>
+          <input type="datetime-local" className="input text-sm" value={value.opens_at}
+            onChange={e => onChange({ ...value, opens_at: e.target.value })}/>
+        </div>
+        <div>
+          <label className="label mb-1.5 block">Closes</label>
+          <input type="datetime-local" className="input text-sm" value={value.closes_at}
+            onChange={e => onChange({ ...value, closes_at: e.target.value })}/>
+        </div>
+      </div>
+      <div className="flex items-center justify-between mt-3">
+        <p className="text-white/25 text-xs">Leave either blank for no limit on that side. Enforced server-side — a closed link rejects submissions even via a direct API call.</p>
+        <button type="button" onClick={() => onChange({ ...value, closes_at: isoToLocalInput(new Date().toISOString()) })}
+          className="text-red-300/70 hover:text-red-300 text-xs font-semibold flex items-center gap-1 flex-shrink-0 ml-3">
+          <Clock size={12}/> Close now
+        </button>
+      </div>
+    </div>
+  )
 }
 
 function CollapsibleListCard({ listKey, items, onChange }: { listKey: string; items: string[]; onChange: (items: string[]) => void }) {
@@ -77,9 +148,13 @@ export default function ClubSettingsPage() {
   // Configurable dropdown lists
   const [lists, setLists] = useState<Record<string, string[]>>(DEFAULT_LISTS)
 
+  // Public registration link windows (/apply, /apply/coach)
+  const [playerRegWindow, setPlayerRegWindow] = useState<RegWindow>({ opens_at: '', closes_at: '' })
+  const [coachRegWindow, setCoachRegWindow] = useState<RegWindow>({ opens_at: '', closes_at: '' })
+
   useEffect(() => {
     async function load() {
-      const keys = ['categories', 'fees', 'club_info', ...Object.keys(DEFAULT_LISTS)]
+      const keys = ['categories', 'fees', 'club_info', 'player_registration', 'coach_registration', ...Object.keys(DEFAULT_LISTS)]
       const { data } = await supabase.from('club_settings').select('key, value').in('key', keys)
       const byKey: Record<string, any> = {}
       data?.forEach(row => { byKey[row.key] = row.value })
@@ -95,6 +170,12 @@ export default function ClubSettingsPage() {
         setClubLocation(byKey.club_info.location ?? '')
         setLogoUrl(byKey.club_info.logo_url ?? '')
       }
+      if (byKey.player_registration) setPlayerRegWindow({
+        opens_at: isoToLocalInput(byKey.player_registration.opens_at), closes_at: isoToLocalInput(byKey.player_registration.closes_at),
+      })
+      if (byKey.coach_registration) setCoachRegWindow({
+        opens_at: isoToLocalInput(byKey.coach_registration.opens_at), closes_at: isoToLocalInput(byKey.coach_registration.closes_at),
+      })
       setLists(prev => {
         const next = { ...prev }
         Object.keys(DEFAULT_LISTS).forEach(key => { if (byKey[key]) next[key] = byKey[key] as string[] })
@@ -136,6 +217,8 @@ export default function ClubSettingsPage() {
       supabase.from('club_settings').upsert({ key: 'categories', value: categories as any, updated_by: uid, updated_at: now }, { onConflict: 'key' }),
       supabase.from('club_settings').upsert({ key: 'fees', value: { entry: entryFee, monthly: monthlyFees } as any, updated_by: uid, updated_at: now }, { onConflict: 'key' }),
       supabase.from('club_settings').upsert({ key: 'club_info', value: { name: clubName, motto: clubMotto, location: clubLocation, logo_url: logoUrl } as any, updated_by: uid, updated_at: now }, { onConflict: 'key' }),
+      supabase.from('club_settings').upsert({ key: 'player_registration', value: { opens_at: localInputToIso(playerRegWindow.opens_at), closes_at: localInputToIso(playerRegWindow.closes_at) } as any, updated_by: uid, updated_at: now }, { onConflict: 'key' }),
+      supabase.from('club_settings').upsert({ key: 'coach_registration', value: { opens_at: localInputToIso(coachRegWindow.opens_at), closes_at: localInputToIso(coachRegWindow.closes_at) } as any, updated_by: uid, updated_at: now }, { onConflict: 'key' }),
       ...Object.entries(lists).map(([key, value]) =>
         supabase.from('club_settings').upsert({ key, value: value as any, updated_by: uid, updated_at: now }, { onConflict: 'key' })
       ),
@@ -144,7 +227,7 @@ export default function ClubSettingsPage() {
     const results = await Promise.all(updates)
     const errors = results.filter(r => r.error)
     if (errors.length) { toast.error('Some settings failed to save'); setSaving(false); return }
-    logAudit(supabase, { action: 'update', entity: 'settings', summary: 'Updated Club Settings (categories/fees/club info/dropdown lists)' })
+    logAudit(supabase, { action: 'update', entity: 'settings', summary: 'Updated Club Settings (categories/fees/club info/registration windows/dropdown lists)' })
     toast.success('Settings saved!')
     setSaving(false)
   }
@@ -243,8 +326,18 @@ export default function ClubSettingsPage() {
         </div>
       </div>
 
-      {/* Configurable dropdown lists */}
+      {/* Public registration links */}
       <div className="mb-2">
+        <h2 className="section-title mb-1">Public Registration Links</h2>
+        <p className="text-white/30 text-xs mb-4">Control when the public self-service forms accept submissions — set a window to prevent spam when you're not actively recruiting.</p>
+      </div>
+      <RegistrationWindowCard title="Player Registration" hint="/apply — replaces the old Google Form" path="/apply"
+        value={playerRegWindow} onChange={setPlayerRegWindow}/>
+      <RegistrationWindowCard title="Coach Applications" hint="/apply/coach — reviewed from Staff & Parents → Applications" path="/apply/coach"
+        value={coachRegWindow} onChange={setCoachRegWindow}/>
+
+      {/* Configurable dropdown lists */}
+      <div className="mb-2 mt-5">
         <h2 className="section-title mb-1">Dropdown Lists</h2>
         <p className="text-white/30 text-xs mb-4">Every list below feeds a dropdown elsewhere in the app — add, rename, or remove options without touching code.</p>
       </div>
