@@ -73,7 +73,7 @@ export default function ParentCardPage() {
             </div>
             <div>
               <p className="section-title mb-2 text-center text-xs">BACK (QR — coach will share)</p>
-              <PassCardBack player={player} guardianPhone={guardianPhone} guardianPhone2={guardianPhone2}/>
+              <PassCardBack player={player}/>
             </div>
             <p className="text-white/20 text-xs text-center">The QR back card is available from your coach after registration confirmation</p>
           </div>

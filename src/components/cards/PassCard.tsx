@@ -2,6 +2,8 @@
 import { useRef, useState } from 'react'
 import { Player } from '@/types/database'
 import { Download, Phone } from 'lucide-react'
+import jsQR from 'jsqr'
+import { toast } from 'react-hot-toast'
 
 interface PassCardProps {
   player: Player
@@ -12,45 +14,56 @@ interface PassCardProps {
   guardianPhone2?: string
 }
 
-// Guardian contact chip — shared by front and back. Supports the club's
-// "primary/secondary" notation: pass both numbers and they render as
+// Guardian contact chip — front of the card only (the club's physical
+// template only ever carried the contact number on the front). Supports
+// the "primary/secondary" notation: pass both numbers and they render as
 // "primary / secondary"; pass only one and it renders alone.
+//
+// Alignment note: this deliberately does NOT pin a fixed height and try to
+// match a line-height to it — that's what caused the icon/number to drift
+// out of sync before (text line-height and an icon's own rendered box
+// don't reliably agree, especially once this gets rasterized by
+// html2canvas). Plain flex `alignItems: 'center'` on two children, neither
+// height-constrained, is what actually keeps them level regardless of font
+// metrics.
 function GuardianBadge({ phone, phone2 }: { phone?: string; phone2?: string }) {
   if (!phone) return null
   const secondary = phone2 && phone2 !== phone ? phone2 : undefined
   return (
     <div style={{
-      marginTop: 7, display: 'inline-flex', alignItems: 'center', height: 20, gap: 6,
-      padding: '0 10px 0 3px',
-      background: 'rgba(78,198,198,0.08)', border: '1px solid rgba(78,198,198,0.25)', borderRadius: 10,
+      marginTop: 7, display: 'inline-flex', alignItems: 'center', gap: 6,
+      padding: '4px 10px 4px 4px',
+      background: 'rgba(78,198,198,0.08)', border: '1px solid rgba(78,198,198,0.25)', borderRadius: 20,
     }}>
-      <div style={{ width: 14, height: 14, borderRadius: '50%', background: 'rgba(78,198,198,0.22)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-        <Phone size={8} color="#4EC6C6" strokeWidth={2.5} style={{ display: 'block' }}/>
+      <div style={{ width: 16, height: 16, borderRadius: '50%', background: 'rgba(78,198,198,0.22)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <Phone size={9} color="#4EC6C6" strokeWidth={2.5}/>
       </div>
-      <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: 9, fontWeight: 600, lineHeight: '20px', letterSpacing: 0.2, whiteSpace: 'nowrap' }}>
+      <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: 9, fontWeight: 600, lineHeight: 1, letterSpacing: 0.2, whiteSpace: 'nowrap' }}>
         {phone}{secondary ? ` / ${secondary}` : ''}
       </span>
     </div>
   )
 }
 
-// Fixed, always-square medallion for the club logo — used as the photo
-// placeholder. A dedicated 1:1 wrapper (rather than sizing the <img> as a
-// percentage of the non-square photo frame) is what actually prevents the
-// logo from reading as squashed/stretched, regardless of the frame's own
-// aspect ratio.
-function LogoMedallion({ logoUrl, size = 80 }: { logoUrl?: string; size?: number }) {
+// Club logo medallion — used as the photo placeholder when a player has no
+// photo yet. Deliberately NOT wrapped in the rectangular photo frame the
+// real-photo case uses: that frame was forcing the logo into a non-square
+// box, which is what read as "distorted" once downloaded. This renders the
+// logo directly on the card as its own circle, sized generously, with
+// objectFit:cover so it fills the circle edge-to-edge (cropping slightly)
+// rather than shrinking to fit with dead space around it.
+function LogoMedallion({ logoUrl, size = 128 }: { logoUrl?: string; size?: number }) {
   return (
     <div style={{
       width: size, height: size, borderRadius: '50%', flexShrink: 0, overflow: 'hidden',
       background: '#0D1B2A', border: '2px solid rgba(78,198,198,0.45)',
-      boxShadow: '0 0 10px rgba(78,198,198,0.35), inset 0 0 8px rgba(78,198,198,0.1)',
+      boxShadow: '0 0 14px rgba(78,198,198,0.3), inset 0 0 10px rgba(78,198,198,0.1)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
       {logoUrl ? (
-        <img src={logoUrl} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} alt="Club logo"/>
+        <img src={logoUrl} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} alt="Club logo"/>
       ) : (
-        <span style={{ color: '#4EC6C6', fontWeight: 900, fontSize: size * 0.2, letterSpacing: 0 }}>OPFC</span>
+        <span style={{ color: '#4EC6C6', fontWeight: 900, fontSize: size * 0.16, letterSpacing: 0 }}>OPFC</span>
       )}
     </div>
   )
@@ -79,20 +92,22 @@ export function PassCardFront({ player, logoUrl, clubName, guardianPhone, guardi
         {clubName ?? 'Oasis Pailles FC'}
       </div>
 
-      {/* Player photo — right side. Falls back to a fixed-aspect logo
-          medallion when there's no photo yet, instead of a generic silhouette. */}
-      <div style={{
-        position: 'absolute', right: 16, top: 50, width: 112, height: 140, borderRadius: 10, overflow: 'hidden',
-        border: '2px solid rgba(78,198,198,0.3)', background: 'rgba(78,198,198,0.05)',
-        boxShadow: '0 0 12px rgba(78,198,198,0.15)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        {player.photo_url ? (
+      {/* Player photo — right side, in a portrait frame. With no photo yet,
+          the club logo renders directly as its own circular medallion
+          instead (no surrounding frame — see LogoMedallion above). */}
+      {player.photo_url ? (
+        <div style={{
+          position: 'absolute', right: 16, top: 50, width: 112, height: 140, borderRadius: 10, overflow: 'hidden',
+          border: '2px solid rgba(78,198,198,0.3)', background: 'rgba(78,198,198,0.05)',
+          boxShadow: '0 0 12px rgba(78,198,198,0.15)',
+        }}>
           <img src={player.photo_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={player.full_name}/>
-        ) : (
-          <LogoMedallion logoUrl={logoUrl} size={80}/>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div style={{ position: 'absolute', right: 8, top: 56 }}>
+          <LogoMedallion logoUrl={logoUrl} size={128}/>
+        </div>
+      )}
 
       {/* Player info — left side */}
       <div style={{ position: 'absolute', left: 14, top: 54, right: 144 }}>
@@ -120,8 +135,9 @@ export function PassCardFront({ player, logoUrl, clubName, guardianPhone, guardi
   )
 }
 
-// Card Back — QR only
-export function PassCardBack({ player, qrUrl, guardianPhone, guardianPhone2 }: { player: Player; qrUrl?: string; guardianPhone?: string; guardianPhone2?: string }) {
+// Card Back — QR only. No contact number here — the club's own template
+// only ever carries it on the front.
+export function PassCardBack({ player, qrUrl }: { player: Player; qrUrl?: string }) {
   return (
     <div style={{
       width: 340, height: 214,
@@ -150,7 +166,6 @@ export function PassCardBack({ player, qrUrl, guardianPhone, guardianPhone2 }: {
         <div style={{ color: '#4EC6C6', fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 4 }}>Attendance Card</div>
         <div style={{ color: 'white', fontSize: 14, fontWeight: 800, textTransform: 'uppercase', lineHeight: 1.2 }}>{player.full_name}</div>
         <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 9, marginTop: 2, fontFamily: 'monospace' }}>{player.player_code}</div>
-        <GuardianBadge phone={guardianPhone} phone2={guardianPhone2}/>
         <div style={{ marginTop: 12, color: 'rgba(255,255,255,0.15)', fontSize: 7 }}>Oasis Pailles Football Club</div>
         <div style={{ color: 'rgba(78,198,198,0.3)', fontSize: 6, fontStyle: 'italic' }}>Omnis Tactus, Officium</div>
       </div>
@@ -181,6 +196,20 @@ export default function PassCard({ player, qrUrl, logoUrl, clubName, guardianPho
         pdf.addPage()
         const c = await html2canvas(backRef.current, { scale: 3, backgroundColor: '#091520', useCORS: true })
         pdf.addImage(c.toDataURL('image/png'), 'PNG', 0, 0, 85.6, 54)
+
+        // Decode the QR straight out of the exact pixels that just went
+        // into the PDF — not a freshly-generated reference copy — so this
+        // catches a genuinely broken/misrendered code, not just a typo in
+        // what we intended to encode.
+        const ctx = c.getContext('2d')
+        if (ctx) {
+          const img = ctx.getImageData(0, 0, c.width, c.height)
+          const decoded = jsQR(img.data, c.width, c.height)
+          const expected = `opfc://player/${player.id}`
+          if (!decoded || decoded.data !== expected) {
+            toast.error(`QR code could not be verified for ${player.full_name} — check the printed card before handing it out`, { duration: 6000 })
+          }
+        }
       }
       pdf.save(`OPFC_Pass_${player.player_code}_${player.full_name.replace(/\s+/g,'_')}.pdf`)
     } finally { setDownloading(false) }
@@ -194,7 +223,7 @@ export default function PassCard({ player, qrUrl, logoUrl, clubName, guardianPho
       </div>
       <div>
         <p className="section-title mb-2 text-center text-xs">BACK (QR)</p>
-        <div ref={backRef}><PassCardBack player={player} qrUrl={qrUrl} guardianPhone={guardianPhone} guardianPhone2={guardianPhone2}/></div>
+        <div ref={backRef}><PassCardBack player={player} qrUrl={qrUrl}/></div>
       </div>
       <button onClick={downloadCard} disabled={downloading} className="btn-primary flex items-center gap-2 w-full justify-center">
         <Download size={15}/>{downloading ? 'Generating…' : 'Download Pass Card (Front + Back)'}

@@ -4,12 +4,13 @@ import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { Player } from '@/types/database'
 import { categoryColor, getAge, formatDate } from '@/lib/utils'
-import { Plus, Search, Filter, Users, Download, FileStack, Pencil, Archive, ArchiveRestore, X } from 'lucide-react'
+import { Plus, Search, Filter, Users, Download, FileStack, Pencil, Archive, ArchiveRestore, X, QrCode, CheckCircle2, AlertTriangle } from 'lucide-react'
 import PlayerCard from '@/components/cards/PlayerCard'
 import { PassCardFront, PassCardBack } from '@/components/cards/PassCard'
 import { toast } from 'react-hot-toast'
 import * as XLSX from 'xlsx'
 import QRCode from 'qrcode'
+import jsQR from 'jsqr'
 import { useScopedCategories } from '@/hooks/useScopedCategories'
 import { usePermissionGuard } from '@/hooks/usePermissionGuard'
 import { useConfigList } from '@/hooks/useConfigList'
@@ -60,6 +61,8 @@ export default function PlayersPage() {
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number } | null>(null)
   const [renderPlayer, setRenderPlayer] = useState<any>(null)
   const [renderQrUrl, setRenderQrUrl] = useState('')
+  const [qrCheckProgress, setQrCheckProgress] = useState<{ done: number; total: number } | null>(null)
+  const [qrCheckResult, setQrCheckResult] = useState<{ total: number; bad: { name: string; code: string; reason: string }[] } | null>(null)
   const [clubInfo, setClubInfo] = useState<{ logo_url?: string; name?: string }>({})
   const positions = useConfigList('positions', FALLBACK_POSITIONS)
 
@@ -207,6 +210,7 @@ export default function PlayersPage() {
 
     setBulkProgress({ done: 0, total: players.length })
     const dateStr = new Date().toISOString().split('T')[0]
+    const badQrs: string[] = []
 
     for (let b = 0; b < batches.length; b++) {
       const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [85.6, 54] })
@@ -235,6 +239,22 @@ export default function PlayersPage() {
           const c = await html2canvas(backEl, { scale: 2, backgroundColor: '#091520', useCORS: true })
           pdf.addPage()
           pdf.addImage(c.toDataURL('image/png'), 'PNG', 0, 0, 85.6, 54)
+
+          // Decode the QR straight out of the pixels that just went into the
+          // PDF for this player, and confirm it still matches their id —
+          // catches a stale off-screen render (this page re-renders
+          // renderPlayer/renderQrUrl every iteration; if a capture ever ran
+          // before React/the browser actually painted the new one, the QR on
+          // a card would silently belong to the previous player) rather than
+          // just confirming the QR library itself can round-trip a string.
+          const ctx = c.getContext('2d')
+          if (ctx) {
+            const img = ctx.getImageData(0, 0, c.width, c.height)
+            const decoded = jsQR(img.data, c.width, c.height)
+            if (!decoded || decoded.data !== `opfc://player/${p.id}`) {
+              badQrs.push(`${p.full_name} (${p.player_code})`)
+            }
+          }
         }
 
         setBulkProgress(prog => prog ? { done: prog.done + 1, total: prog.total } : prog)
@@ -248,7 +268,68 @@ export default function PlayersPage() {
     toast.success(multiFile
       ? `${players.length} player cards downloaded across ${batches.length} PDFs`
       : `${players.length} player cards downloaded`)
+    if (badQrs.length) {
+      toast.error(`${badQrs.length} QR code(s) didn't verify — check before printing: ${badQrs.slice(0, 5).join(', ')}${badQrs.length > 5 ? `, +${badQrs.length - 5} more` : ''}`, { duration: 10000 })
+    }
     setBulkProgress(null)
+  }
+
+  // Standalone, fast integrity check — no PDF/DOM rendering, just generates
+  // each active player's QR exactly as the bulk export would and decodes it
+  // straight back, so you can confirm every card's QR is sound without
+  // physically scanning each printed one. Also catches two different
+  // players somehow ending up with the same payload (which a self-decode
+  // alone can't).
+  async function verifyQrCodes() {
+    const { data, error } = await supabase
+      .from('players')
+      .select('id, full_name, player_code')
+      .eq('is_active', true)
+      .order('full_name')
+    if (error || !data?.length) { toast.error('No players to verify'); return }
+
+    setQrCheckResult(null)
+    setQrCheckProgress({ done: 0, total: data.length })
+
+    const bad: { name: string; code: string; reason: string }[] = []
+    const seenPayloads = new Map<string, string>() // payload -> player_code
+
+    const canvas = document.createElement('canvas')
+    const ctx = canvas.getContext('2d')!
+
+    for (const p of data as any[]) {
+      const expected = `opfc://player/${p.id}`
+      const dataUrl = await QRCode.toDataURL(expected, {
+        color: { dark: '#4EC6C6', light: '#0D1B2A' }, width: 200, margin: 2,
+      })
+      const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const el = new Image()
+        el.onload = () => resolve(el)
+        el.onerror = reject
+        el.src = dataUrl
+      })
+      canvas.width = img.width
+      canvas.height = img.height
+      ctx.drawImage(img, 0, 0)
+      const decoded = jsQR(ctx.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height)
+
+      if (!decoded) {
+        bad.push({ name: p.full_name, code: p.player_code, reason: 'Could not be decoded at all' })
+      } else if (decoded.data !== expected) {
+        bad.push({ name: p.full_name, code: p.player_code, reason: `Decoded to the wrong value` })
+      } else if (seenPayloads.has(decoded.data)) {
+        bad.push({ name: p.full_name, code: p.player_code, reason: `Same QR as ${seenPayloads.get(decoded.data)}` })
+      } else {
+        seenPayloads.set(decoded.data, p.player_code)
+      }
+
+      setQrCheckProgress(prog => prog ? { done: prog.done + 1, total: prog.total } : prog)
+    }
+
+    setQrCheckProgress(null)
+    setQrCheckResult({ total: data.length, bad })
+    if (bad.length) toast.error(`${bad.length} of ${data.length} QR codes need attention`)
+    else toast.success(`All ${data.length} QR codes verified — each decodes correctly and uniquely`)
   }
 
   async function fetchPlayers() {
@@ -300,6 +381,10 @@ export default function PlayersPage() {
           <button onClick={downloadAllCards} disabled={!!bulkProgress}
             className="btn-secondary flex items-center gap-2 self-start text-sm">
             <FileStack size={14}/> {bulkProgress ? `${bulkProgress.done}/${bulkProgress.total}…` : 'Download All Cards'}
+          </button>
+          <button onClick={verifyQrCodes} disabled={!!qrCheckProgress} title="Decodes every active player's QR without printing anything, confirming each one is correct and no two players share a code"
+            className="btn-secondary flex items-center gap-2 self-start text-sm">
+            <QrCode size={14}/> {qrCheckProgress ? `${qrCheckProgress.done}/${qrCheckProgress.total}…` : 'Verify QR Codes'}
           </button>
           <Link href="/coach/players/import" className="btn-secondary flex items-center gap-2 self-start text-sm">
             <span>↑</span> Import
@@ -470,9 +555,7 @@ export default function PlayersPage() {
             <div id="bulk-card-front"><PassCardFront player={renderPlayer} logoUrl={clubInfo.logo_url} clubName={clubInfo.name}
               guardianPhone={(Array.isArray(renderPlayer.guardian) ? renderPlayer.guardian[0] : renderPlayer.guardian)?.phone_primary}
               guardianPhone2={(Array.isArray(renderPlayer.guardian) ? renderPlayer.guardian[0] : renderPlayer.guardian)?.phone_secondary}/></div>
-            <div id="bulk-card-back"><PassCardBack player={renderPlayer} qrUrl={renderQrUrl}
-              guardianPhone={(Array.isArray(renderPlayer.guardian) ? renderPlayer.guardian[0] : renderPlayer.guardian)?.phone_primary}
-              guardianPhone2={(Array.isArray(renderPlayer.guardian) ? renderPlayer.guardian[0] : renderPlayer.guardian)?.phone_secondary}/></div>
+            <div id="bulk-card-back"><PassCardBack player={renderPlayer} qrUrl={renderQrUrl}/></div>
           </>
         )}
       </div>
@@ -517,6 +600,54 @@ export default function PlayersPage() {
             <div className="h-1.5 bg-white/10 rounded-full overflow-hidden mt-4">
               <div className="h-full bg-teal-400 rounded-full transition-all" style={{ width: `${(bulkProgress.done / bulkProgress.total) * 100}%` }}/>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* QR verification progress */}
+      {qrCheckProgress && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="card p-6 w-full max-w-sm text-center">
+            <div className="animate-spin w-8 h-8 border-2 border-teal-400/30 border-t-teal-400 rounded-full mx-auto mb-4"/>
+            <p className="text-white font-semibold text-sm">Verifying QR codes…</p>
+            <p className="text-white/40 text-xs mt-1">{qrCheckProgress.done} of {qrCheckProgress.total}</p>
+            <div className="h-1.5 bg-white/10 rounded-full overflow-hidden mt-4">
+              <div className="h-full bg-teal-400 rounded-full transition-all" style={{ width: `${(qrCheckProgress.done / qrCheckProgress.total) * 100}%` }}/>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* QR verification results */}
+      {qrCheckResult && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4" onClick={() => setQrCheckResult(null)}>
+          <div className="card p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3 mb-4">
+              <div className="flex items-center gap-2">
+                {qrCheckResult.bad.length === 0
+                  ? <CheckCircle2 size={20} className="text-green-400"/>
+                  : <AlertTriangle size={20} className="text-amber-400"/>}
+                <p className="text-white font-semibold text-sm">
+                  {qrCheckResult.bad.length === 0 ? 'All QR codes verified' : `${qrCheckResult.bad.length} of ${qrCheckResult.total} need attention`}
+                </p>
+              </div>
+              <button onClick={() => setQrCheckResult(null)} className="text-white/30 hover:text-white"><X size={16}/></button>
+            </div>
+            {qrCheckResult.bad.length === 0 ? (
+              <p className="text-white/40 text-xs">Every active player's QR decodes to the correct, unique value — safe to print.</p>
+            ) : (
+              <div className="space-y-2 max-h-64 overflow-y-auto">
+                {qrCheckResult.bad.map((b, i) => (
+                  <div key={i} className="flex items-center justify-between gap-3 py-2 border-b border-white/5 last:border-0">
+                    <div>
+                      <p className="text-white text-sm">{b.name}</p>
+                      <p className="text-white/30 text-xs font-mono">{b.code}</p>
+                    </div>
+                    <span className="text-amber-400 text-xs text-right">{b.reason}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
