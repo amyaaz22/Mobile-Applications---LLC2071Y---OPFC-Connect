@@ -19,13 +19,15 @@ interface PassCardProps {
 // the "primary/secondary" notation: pass both numbers and they render as
 // "primary / secondary"; pass only one and it renders alone.
 //
-// Alignment note: this deliberately does NOT pin a fixed height and try to
-// match a line-height to it — that's what caused the icon/number to drift
-// out of sync before (text line-height and an icon's own rendered box
-// don't reliably agree, especially once this gets rasterized by
-// html2canvas). Plain flex `alignItems: 'center'` on two children, neither
-// height-constrained, is what actually keeps them level regardless of font
-// metrics.
+// Alignment note: `lineHeight: 1` at a 9px font size collapses the text's
+// line box to 9px — smaller than the font's natural ascent+descent — so the
+// browser has to decide where to clip/shift the glyphs, which rendered
+// differently (and visibly off-center against the icon) between the live
+// preview and html2canvas's own rasterization. Giving both the icon circle
+// AND the text an identical, explicit 16px box (`lineHeight: '16px'` on the
+// span, not `1`) means the outer flex's `alignItems: 'center'` is centering
+// two same-height boxes — nothing left for either renderer to interpret
+// differently.
 function GuardianBadge({ phone, phone2 }: { phone?: string; phone2?: string }) {
   if (!phone) return null
   const secondary = phone2 && phone2 !== phone ? phone2 : undefined
@@ -38,7 +40,7 @@ function GuardianBadge({ phone, phone2 }: { phone?: string; phone2?: string }) {
       <div style={{ width: 16, height: 16, borderRadius: '50%', background: 'rgba(78,198,198,0.22)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
         <Phone size={9} color="#4EC6C6" strokeWidth={2.5}/>
       </div>
-      <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: 9, fontWeight: 600, lineHeight: 1, letterSpacing: 0.2, whiteSpace: 'nowrap' }}>
+      <span style={{ display: 'inline-block', height: 16, lineHeight: '16px', color: 'rgba(255,255,255,0.8)', fontSize: 9, fontWeight: 600, letterSpacing: 0.2, whiteSpace: 'nowrap' }}>
         {phone}{secondary ? ` / ${secondary}` : ''}
       </span>
     </div>

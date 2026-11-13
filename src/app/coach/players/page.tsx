@@ -199,14 +199,23 @@ export default function PlayersPage() {
       .order('full_name')
     if (error || !data?.length) { toast.error('No players to export'); return }
 
-    const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
-      import('html2canvas'), import('jspdf'),
+    const [{ default: html2canvas }, { default: jsPDF }, { default: JSZip }] = await Promise.all([
+      import('html2canvas'), import('jspdf'), import('jszip'),
     ])
 
     const players = data as any[]
     const batches: any[][] = []
     for (let i = 0; i < players.length; i += CARDS_PER_FILE) batches.push(players.slice(i, i + CARDS_PER_FILE))
     const multiFile = batches.length > 1
+
+    // Chrome (and other Chromium browsers) block a page from triggering more
+    // than one automatic file download in a row unless the user explicitly
+    // allows it — each batch's pdf.save() happens well after the original
+    // click, across several `await`s, so only the first of several batches
+    // was ever actually reaching disk; the rest were silently blocked with
+    // no error we could even catch. Bundling every batch's PDF into a single
+    // .zip means exactly one download fires, which is never blocked.
+    const zip = multiFile ? new JSZip() : null
 
     setBulkProgress({ done: 0, total: players.length })
     const dateStr = new Date().toISOString().split('T')[0]
@@ -261,12 +270,26 @@ export default function PlayersPage() {
       }
 
       const suffix = multiFile ? `_part${b + 1}of${batches.length}` : ''
-      pdf.save(`OPFC_All_Player_Cards${suffix}_${dateStr}.pdf`)
+      const filename = `OPFC_All_Player_Cards${suffix}_${dateStr}.pdf`
+      if (zip) zip.file(filename, pdf.output('arraybuffer'))
+      else pdf.save(filename)
+    }
+
+    if (zip) {
+      const blob = await zip.generateAsync({ type: 'blob' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `OPFC_All_Player_Cards_${dateStr}.zip`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
     }
 
     setRenderPlayer(null)
     toast.success(multiFile
-      ? `${players.length} player cards downloaded across ${batches.length} PDFs`
+      ? `${players.length} player cards downloaded as ${batches.length} PDFs in one .zip`
       : `${players.length} player cards downloaded`)
     if (badQrs.length) {
       toast.error(`${badQrs.length} QR code(s) didn't verify — check before printing: ${badQrs.slice(0, 5).join(', ')}${badQrs.length > 5 ? `, +${badQrs.length - 5} more` : ''}`, { duration: 10000 })
