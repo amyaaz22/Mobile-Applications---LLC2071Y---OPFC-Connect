@@ -110,7 +110,7 @@ src/
       income/               — Donations / sponsorships / fundraising income
       expenses/             — Club expenses (referee fees, transport, equipment, …)
       inventory/            — Kit/equipment tracking, low-stock alerts
-      staff/                — Admin-only: invite/promote coaches, manage parent contacts, granular permission chips per coach/admin, "Export Contacts" (.vcf) for bulk-importing parent numbers into coaching staff phones, Applications tab (area 'staff') to review/approve/reject public /apply/coach submissions — see "Coach Applications" below
+      staff/                — Admin-only: invite/promote coaches, manage parent contacts (edit guardian info inline, grant/revoke a parent's account access per child, bulk-select guardians for Export Selected / Send Invite to Selected — see "Parent Account Management" below), granular permission chips per coach/admin, "Export Contacts" (.vcf) for bulk-importing parent numbers into coaching staff phones, Applications tab (area 'staff') to review/approve/reject public /apply/coach submissions — see "Coach Applications" below
       announcements/        — Post/delete announcements
       settings/             — Club settings (logo, categories, fees) + Public Registration Links (opens_at/closes_at window for /apply and /apply/coach, see "Registration Windows" below) + Dropdown Lists (positions, guardian relationships, announcement tags, payment methods, expense/income/inventory categories, inventory conditions — every dropdown in the app that used to be hardcoded)
       admin/                — Super Admin panel (area 'system', admin-only): Accounts tab (every profile + last sign-in/email-confirmed from Supabase Auth) + Activity Log tab (audit_log, filterable by entity)
@@ -401,6 +401,61 @@ the chips (and `togglePermission()` itself) now refuse a self-target.
 2. Parent creates account at /register with same email
 3. Coach opens player edit → saves → system auto-links profile_id + sets role to 'parent'
 4. Parent logs in → sees their child
+
+**Or, proactively from Staff & Parents → Parents** (see "Parent Account
+Management" below): staff invites the guardian directly and the new
+account is linked immediately — no waiting on the parent to self-register
+first.
+
+---
+
+## Parent Account Management
+Staff & Parents → **Parents** tab does more than list contacts — each
+guardian row supports editing, granting/revoking account access, and bulk
+actions across a checkbox selection, all added in response to wanting
+direct control over parent accounts from the same table that already shows
+them, rather than only being able to invite a brand-new blank account from
+the top of the page or wait on the self-register-then-auto-link flow above.
+
+- **Edit** (pencil icon) opens a modal to change a guardian's full name,
+  relationship (from the `guardian_relationships` Dropdown List), both
+  phone numbers, and email — a direct `guardians` table update, same RLS
+  policy ('players' or 'staff' permission) the player edit page's guardian
+  section already relies on.
+- **Grant Access** (shown when a row has no linked account) opens a modal
+  pre-filled with the guardian's email if one's on file, or empty with a
+  note if not — submitting invites them directly via the *existing*
+  `/api/staff/invite` route (same endpoint "Invite Coach"/"Invite Parent"
+  already use, with `role: 'parent'`) and immediately sets that guardian
+  row's `profile_id` to the new account's id, skipping the self-register
+  step in "How Parent Linking Works" above. If the email differs from what
+  was on file, it's saved back to the guardian record too.
+- **Revoke** (shown when a row has a linked account) clears that one
+  guardian row's `profile_id` after a confirmation — it does **not** delete
+  the underlying Supabase Auth account or touch its role, since the same
+  parent may be linked to other children via their own separate guardian
+  rows (one row per child, as the table already showed before this). A
+  full "delete this parent's login entirely" is a bigger, separate action
+  not exposed here.
+- **Bulk selection**: a checkbox per row (+ select-all in the header),
+  same pattern the Players page already uses. A selection bar offers
+  **Export Selected** (same `.xlsx` shape as the existing "Export" button,
+  just scoped to the selection) and **Send Invite to Selected** — invites
+  every selected guardian that both lacks an account and has an email on
+  file (sequential, same throttled-loop pattern as the existing bulk coach
+  import), skipping and reporting a count for ones already linked or
+  missing an email, rather than silently doing nothing for them.
+- Verified against production using a disposable test player + guardian
+  row created and deleted solely for this check (never a real family's
+  data) — edit, bulk-select + Export Selected, and Revoke (using a
+  harmless stand-in profile id) were all exercised live via Playwright
+  against the real app; **Grant Access**/**Send Invite to Selected**
+  themselves were reviewed rather than click-tested, since actually firing
+  them creates a real Supabase Auth account and sends a real invite email
+  (the session's own safety guard rightly blocks that as a production side
+  effect during automated verification) — their code is a direct
+  structural match to the already-proven `InviteModal.send()` call to the
+  same `/api/staff/invite` endpoint.
 
 ---
 
