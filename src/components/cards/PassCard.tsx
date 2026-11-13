@@ -1,5 +1,5 @@
 'use client'
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Player } from '@/types/database'
 import { Download, Phone } from 'lucide-react'
 
@@ -12,46 +12,163 @@ interface PassCardProps {
   guardianPhone2?: string
 }
 
-// Guardian contact chip — shared by front and back. Supports the club's
-// "primary/secondary" notation: pass both numbers and they render as
-// "primary / secondary"; pass only one and it renders alone.
-function GuardianBadge({ phone, phone2 }: { phone?: string; phone2?: string }) {
-  if (!phone) return null
-  const secondary = phone2 && phone2 !== phone ? phone2 : undefined
-  return (
-    <div style={{
-      marginTop: 7, display: 'inline-flex', alignItems: 'center', height: 20, gap: 6,
-      padding: '0 10px 0 3px',
-      background: 'rgba(78,198,198,0.08)', border: '1px solid rgba(78,198,198,0.25)', borderRadius: 10,
-    }}>
-      <div style={{ width: 14, height: 14, borderRadius: '50%', background: 'rgba(78,198,198,0.22)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-        <Phone size={8} color="#4EC6C6" strokeWidth={2.5} style={{ display: 'block' }}/>
-      </div>
-      <span style={{ color: 'rgba(255,255,255,0.8)', fontSize: 9, fontWeight: 600, lineHeight: '20px', letterSpacing: 0.2, whiteSpace: 'nowrap' }}>
-        {phone}{secondary ? ` / ${secondary}` : ''}
-      </span>
-    </div>
-  )
+// ─────────────────────────────────────────────────────────────────────────────
+// Image preparation for the card.
+//
+// html2canvas 1.4.x (what produces the downloaded PDF) does NOT implement the
+// CSS `object-fit` property — it just stretches the <img> to its box. That is
+// why the logo looked fine on screen but came out squashed/stretched (and tiny,
+// because it was shrunk to sit inside a medallion) in the download. So the
+// cropping is done here, on a canvas, and the card renders a plain <img> whose
+// width/height already match the picture's real aspect ratio.
+// ─────────────────────────────────────────────────────────────────────────────
+export interface PreparedImage { src: string; w: number; h: number }
+
+const prepared = new Map<string, PreparedImage | null>()
+const pending = new Map<string, Promise<PreparedImage | null>>()
+
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => resolve(img)
+    img.onerror = () => reject(new Error('image failed to load'))
+    img.src = url
+  })
 }
 
-// Fixed, always-square medallion for the club logo — used as the photo
-// placeholder. A dedicated 1:1 wrapper (rather than sizing the <img> as a
-// percentage of the non-square photo frame) is what actually prevents the
-// logo from reading as squashed/stretched, regardless of the frame's own
-// aspect ratio.
-function LogoMedallion({ logoUrl, size = 80 }: { logoUrl?: string; size?: number }) {
+// Crop away the empty margin around the club crest — transparent padding, or a
+// flat background colour matching the corners — so the crest itself fills the
+// space it is given instead of floating small inside its own canvas.
+function trimMargins(img: HTMLImageElement): PreparedImage {
+  const MAX = 800
+  const k = Math.min(1, MAX / Math.max(img.naturalWidth, img.naturalHeight))
+  const W = Math.max(1, Math.round(img.naturalWidth * k))
+  const H = Math.max(1, Math.round(img.naturalHeight * k))
+  const c = document.createElement('canvas'); c.width = W; c.height = H
+  const ctx = c.getContext('2d', { willReadFrequently: true })!
+  ctx.drawImage(img, 0, 0, W, H)
+  const { data } = ctx.getImageData(0, 0, W, H)
+
+  const px = (x: number, y: number) => { const i = (y * W + x) * 4; return [data[i], data[i + 1], data[i + 2], data[i + 3]] }
+  const corners = [px(0, 0), px(W - 1, 0), px(0, H - 1), px(W - 1, H - 1)]
+  const transparentBg = corners.every(c => c[3] < 20)
+  const bg = [0, 1, 2].map(ch => corners.reduce((a, c) => a + c[ch], 0) / 4)
+  const cornersAgree = corners.every(c => Math.abs(c[0] - bg[0]) + Math.abs(c[1] - bg[1]) + Math.abs(c[2] - bg[2]) < 36)
+
+  const isContent = (i: number) => {
+    if (transparentBg) return data[i + 3] > 24
+    if (!cornersAgree) return data[i + 3] > 24
+    if (data[i + 3] < 24) return false
+    return Math.abs(data[i] - bg[0]) + Math.abs(data[i + 1] - bg[1]) + Math.abs(data[i + 2] - bg[2]) > 48
+  }
+
+  let x0 = W, y0 = H, x1 = -1, y1 = -1
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (isContent((y * W + x) * 4)) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y }
+  }
+  // Nothing detected (or an implausibly tiny box) — keep the picture whole.
+  if (x1 < 0 || (x1 - x0) < W * 0.1 || (y1 - y0) < H * 0.1) return { src: c.toDataURL('image/png'), w: W, h: H }
+
+  const padX = Math.round((x1 - x0) * 0.02), padY = Math.round((y1 - y0) * 0.02)
+  x0 = Math.max(0, x0 - padX); y0 = Math.max(0, y0 - padY)
+  x1 = Math.min(W - 1, x1 + padX); y1 = Math.min(H - 1, y1 + padY)
+  const w = x1 - x0 + 1, h = y1 - y0 + 1
+  const out = document.createElement('canvas'); out.width = w; out.height = h
+  out.getContext('2d')!.drawImage(c, x0, y0, w, h, 0, 0, w, h)
+  return { src: out.toDataURL('image/png'), w, h }
+}
+
+// Centre-crop a photo to the frame's aspect ratio (what object-fit: cover does
+// on screen, but baked into the pixels so the PDF matches).
+function coverCrop(img: HTMLImageElement, aspect: number): PreparedImage {
+  const nw = img.naturalWidth, nh = img.naturalHeight
+  let sw = nw, sh = nw / aspect
+  if (sh > nh) { sh = nh; sw = nh * aspect }
+  const sx = (nw - sw) / 2, sy = (nh - sh) / 2
+  const k = Math.min(1, 900 / Math.max(sw, sh))
+  const w = Math.round(sw * k), h = Math.round(sh * k)
+  const out = document.createElement('canvas'); out.width = w; out.height = h
+  out.getContext('2d')!.drawImage(img, sx, sy, sw, sh, 0, 0, w, h)
+  return { src: out.toDataURL('image/jpeg', 0.92), w, h }
+}
+
+type PrepMode = { kind: 'trim' } | { kind: 'cover'; aspect: number }
+const keyOf = (url: string, m: PrepMode) => m.kind === 'trim' ? `trim|${url}` : `cover${m.aspect.toFixed(3)}|${url}`
+
+// Resolves once the prepared image is cached. Falls back to null (caller then
+// uses the raw URL) if the host does not allow canvas access.
+export function prepareImage(url: string | undefined, mode: PrepMode): Promise<PreparedImage | null> {
+  if (!url) return Promise.resolve(null)
+  const key = keyOf(url, mode)
+  if (prepared.has(key)) return Promise.resolve(prepared.get(key) ?? null)
+  let p = pending.get(key)
+  if (!p) {
+    p = loadImage(url)
+      .then(img => (mode.kind === 'trim' ? trimMargins(img) : coverCrop(img, mode.aspect)))
+      .catch(() => null)
+      .then(r => { prepared.set(key, r); pending.delete(key); return r })
+    pending.set(key, p)
+  }
+  return p
+}
+
+export const preloadLogo = (logoUrl?: string) => prepareImage(logoUrl, { kind: 'trim' })
+
+function usePrepared(url: string | undefined, mode: PrepMode): PreparedImage | null | undefined {
+  const key = url ? keyOf(url, mode) : ''
+  // undefined = still working; null = could not prepare (use the raw URL)
+  const [val, setVal] = useState<PreparedImage | null | undefined>(() => (url && prepared.has(key) ? prepared.get(key) : url ? undefined : null))
+  useEffect(() => {
+    if (!url) { setVal(null); return }
+    if (prepared.has(key)) { setVal(prepared.get(key)); return }
+    let live = true
+    prepareImage(url, mode).then(r => { if (live) setVal(r) })
+    return () => { live = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key])
+  return val
+}
+
+// The club crest, shown bare (no frame) at the largest size that fits the box
+// while keeping its true proportions.
+function ClubLogo({ logoUrl, maxW, maxH }: { logoUrl?: string; maxW: number; maxH: number }) {
+  const img = usePrepared(logoUrl, { kind: 'trim' })
+  if (logoUrl && img) {
+    const s = Math.min(maxW / img.w, maxH / img.h)
+    return <img src={img.src} width={Math.round(img.w * s)} height={Math.round(img.h * s)} style={{ display: 'block' }} alt="Club logo"/>
+  }
+  if (logoUrl && img === undefined) return <div style={{ width: maxW, height: maxH }}/>
+  return <span style={{ color: '#4EC6C6', fontWeight: 900, fontSize: 34, letterSpacing: 1 }}>OPFC</span>
+}
+
+const PHOTO_W = 112, PHOTO_H = 140
+function PlayerPhoto({ url, name }: { url: string; name: string }) {
+  const img = usePrepared(url, { kind: 'cover', aspect: PHOTO_W / PHOTO_H })
+  if (img === undefined) return null
+  return <img src={img ? img.src : url} width={PHOTO_W} height={PHOTO_H} style={{ display: 'block' }} alt={name}/>
+}
+
+// Guardian contact — front of the card only. Supports the club's
+// "primary / secondary" notation. Built from fixed-size, absolutely placed
+// parts rather than flex centring: html2canvas positions text and inline SVG
+// by their own line boxes, so flex "align-items: center" drifted the icon and
+// the number apart in the downloaded card.
+function GuardianContact({ phone, phone2 }: { phone?: string; phone2?: string }) {
+  if (!phone) return null
+  const secondary = phone2 && phone2 !== phone ? phone2 : undefined
+  const text = secondary ? `${phone} / ${secondary}` : phone
+  const H = 18
   return (
-    <div style={{
-      width: size, height: size, borderRadius: '50%', flexShrink: 0, overflow: 'hidden',
-      background: '#0D1B2A', border: '2px solid rgba(78,198,198,0.45)',
-      boxShadow: '0 0 10px rgba(78,198,198,0.35), inset 0 0 8px rgba(78,198,198,0.1)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-    }}>
-      {logoUrl ? (
-        <img src={logoUrl} style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }} alt="Club logo"/>
-      ) : (
-        <span style={{ color: '#4EC6C6', fontWeight: 900, fontSize: size * 0.2, letterSpacing: 0 }}>OPFC</span>
-      )}
+    <div style={{ position: 'relative', marginTop: 9, height: H, paddingLeft: H + 7, whiteSpace: 'nowrap' }}>
+      <div style={{ position: 'absolute', left: 0, top: 0, width: H, height: H, borderRadius: '50%', background: 'rgba(78,198,198,0.18)', border: '1px solid rgba(78,198,198,0.45)', boxSizing: 'border-box' }}>
+        <div style={{ position: 'absolute', left: 0, top: 0, width: H - 2, height: H - 2, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Phone size={10} color="#4EC6C6" strokeWidth={2.4} style={{ display: 'block' }}/>
+        </div>
+      </div>
+      <span style={{ display: 'block', height: H, lineHeight: `${H}px`, color: 'rgba(255,255,255,0.92)', fontSize: 10, fontWeight: 700, letterSpacing: 0.3 }}>
+        {text}
+      </span>
     </div>
   )
 }
@@ -74,39 +191,35 @@ export function PassCardFront({ player, logoUrl, clubName, guardianPhone, guardi
       {/* Diagonal background accent */}
       <div style={{ position: 'absolute', top: 0, right: 0, width: 140, height: '100%', background: 'linear-gradient(135deg, transparent 30%, rgba(78,198,198,0.04) 100%)' }}/>
 
-      {/* Club name — top left, no logo/season here (logo moved into the photo slot below) */}
+      {/* Club name — top left */}
       <div style={{ position: 'absolute', top: 14, left: 14, color: 'rgba(255,255,255,0.9)', fontSize: 9, fontWeight: 700, letterSpacing: 0.5 }}>
         {clubName ?? 'Oasis Pailles FC'}
       </div>
 
-      {/* Player photo — right side. Falls back to a fixed-aspect logo
-          medallion when there's no photo yet, instead of a generic silhouette. */}
-      <div style={{
-        position: 'absolute', right: 16, top: 50, width: 112, height: 140, borderRadius: 10, overflow: 'hidden',
-        border: '2px solid rgba(78,198,198,0.3)', background: 'rgba(78,198,198,0.05)',
-        boxShadow: '0 0 12px rgba(78,198,198,0.15)',
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-      }}>
-        {player.photo_url ? (
-          <img src={player.photo_url} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt={player.full_name}/>
-        ) : (
-          <LogoMedallion logoUrl={logoUrl} size={80}/>
-        )}
-      </div>
+      {/* Right side: the player's photo when there is one, otherwise the club
+          crest — large and frameless, centred in the same space. */}
+      {player.photo_url ? (
+        <div style={{
+          position: 'absolute', right: 16, top: 50, width: PHOTO_W, height: PHOTO_H, borderRadius: 10, overflow: 'hidden',
+          border: '2px solid rgba(78,198,198,0.3)', boxShadow: '0 0 12px rgba(78,198,198,0.15)',
+        }}>
+          <PlayerPhoto url={player.photo_url} name={player.full_name}/>
+        </div>
+      ) : (
+        <div style={{ position: 'absolute', right: 16, top: 34, width: 116, height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <ClubLogo logoUrl={logoUrl} maxW={116} maxH={160}/>
+        </div>
+      )}
 
       {/* Player info — left side */}
-      <div style={{ position: 'absolute', left: 14, top: 54, right: 144 }}>
-        {/* Large initials */}
+      <div style={{ position: 'absolute', left: 14, top: 54, right: 150 }}>
         <div style={{ color: '#4EC6C6', fontSize: 42, fontWeight: 900, lineHeight: 1, letterSpacing: -1 }}>
           {initials}
         </div>
-
-        {/* Full name */}
         <div style={{ color: 'white', fontSize: 11, fontWeight: 700, marginTop: 6, lineHeight: 1.3, textTransform: 'uppercase', letterSpacing: 0.3 }}>
           {player.full_name}
         </div>
-
-        <GuardianBadge phone={guardianPhone} phone2={guardianPhone2}/>
+        <GuardianContact phone={guardianPhone} phone2={guardianPhone2}/>
       </div>
 
       {/* Member ID — bottom left */}
@@ -120,8 +233,9 @@ export function PassCardFront({ player, logoUrl, clubName, guardianPhone, guardi
   )
 }
 
-// Card Back — QR only
-export function PassCardBack({ player, qrUrl, guardianPhone, guardianPhone2 }: { player: Player; qrUrl?: string; guardianPhone?: string; guardianPhone2?: string }) {
+// Card Back — QR + identity. No contact number here: it lives on the front only.
+// (guardianPhone props are still accepted so existing callers keep compiling.)
+export function PassCardBack({ player, qrUrl }: { player: Player; qrUrl?: string; guardianPhone?: string; guardianPhone2?: string }) {
   return (
     <div style={{
       width: 340, height: 214,
@@ -136,13 +250,13 @@ export function PassCardBack({ player, qrUrl, guardianPhone, guardianPhone2 }: {
       {/* QR section */}
       <div style={{ padding: 18, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 }}>
         {qrUrl ? (
-          <div style={{ padding: 6, borderRadius: 10, border: '1px solid rgba(78,198,198,0.25)', boxShadow: '0 0 12px rgba(78,198,198,0.18)' }}>
-            <img src={qrUrl} style={{ width: 128, height: 128, display: 'block', borderRadius: 4 }} alt="QR Code"/>
+          <div style={{ padding: 4, borderRadius: 10, background: '#FFFFFF' }}>
+            <img src={qrUrl} width={128} height={128} style={{ display: 'block', borderRadius: 6 }} alt="QR Code"/>
           </div>
         ) : (
           <div style={{ width: 140, height: 140, background: 'rgba(78,198,198,0.05)', borderRadius: 8, border: '1px dashed rgba(78,198,198,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'rgba(78,198,198,0.3)', fontSize: 11 }}>QR</div>
         )}
-        <div style={{ color: 'rgba(255,255,255,0.2)', fontSize: 7, textAlign: 'center', letterSpacing: 0.5 }}>SCAN TO CHECK IN</div>
+        <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 7, fontWeight: 700, textAlign: 'center', letterSpacing: 1 }}>SCAN TO CHECK IN</div>
       </div>
 
       {/* Info section */}
@@ -150,9 +264,8 @@ export function PassCardBack({ player, qrUrl, guardianPhone, guardianPhone2 }: {
         <div style={{ color: '#4EC6C6', fontSize: 9, fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 4 }}>Attendance Card</div>
         <div style={{ color: 'white', fontSize: 14, fontWeight: 800, textTransform: 'uppercase', lineHeight: 1.2 }}>{player.full_name}</div>
         <div style={{ color: 'rgba(255,255,255,0.4)', fontSize: 9, marginTop: 2, fontFamily: 'monospace' }}>{player.player_code}</div>
-        <GuardianBadge phone={guardianPhone} phone2={guardianPhone2}/>
-        <div style={{ marginTop: 12, color: 'rgba(255,255,255,0.15)', fontSize: 7 }}>Oasis Pailles Football Club</div>
-        <div style={{ color: 'rgba(78,198,198,0.3)', fontSize: 6, fontStyle: 'italic' }}>Omnis Tactus, Officium</div>
+        <div style={{ marginTop: 14, color: 'rgba(255,255,255,0.5)', fontSize: 7.5 }}>Oasis Pailles Football Club</div>
+        <div style={{ color: 'rgba(78,198,198,0.65)', fontSize: 7, fontStyle: 'italic' }}>Omnis Tactus, Officium</div>
       </div>
 
       <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: 3, background: 'linear-gradient(90deg, #4EC6C6 0%, rgba(78,198,198,0.2) 70%, transparent 100%)' }}/>
@@ -171,6 +284,9 @@ export default function PassCard({ player, qrUrl, logoUrl, clubName, guardianPho
     try {
       const { default: html2canvas } = await import('html2canvas')
       const { default: jsPDF } = await import('jspdf')
+      await preloadLogo(logoUrl)
+      if (player.photo_url) await prepareImage(player.photo_url, { kind: 'cover', aspect: PHOTO_W / PHOTO_H })
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))
       const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: [85.6, 54] })
 
       if (frontRef.current) {

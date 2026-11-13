@@ -4,12 +4,12 @@ import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { Player } from '@/types/database'
 import { categoryColor, getAge, formatDate } from '@/lib/utils'
-import { Plus, Search, Filter, Users, Download, FileStack, Pencil, Archive, ArchiveRestore, X } from 'lucide-react'
+import { Plus, Search, Filter, Users, Download, FileStack, Pencil, Archive, ArchiveRestore, X, ShieldCheck } from 'lucide-react'
 import PlayerCard from '@/components/cards/PlayerCard'
-import { PassCardFront, PassCardBack } from '@/components/cards/PassCard'
+import { PassCardFront, PassCardBack, preloadLogo, prepareImage } from '@/components/cards/PassCard'
 import { toast } from 'react-hot-toast'
 import * as XLSX from 'xlsx'
-import QRCode from 'qrcode'
+import { playerQrDataUrl } from '@/lib/cardQr'
 import { useScopedCategories } from '@/hooks/useScopedCategories'
 import { usePermissionGuard } from '@/hooks/usePermissionGuard'
 import { useConfigList } from '@/hooks/useConfigList'
@@ -201,6 +201,9 @@ export default function PlayersPage() {
     ])
 
     const players = data as any[]
+    // Prepare (trim/crop) the club logo once up front so every card in the
+    // export gets the same, already-cached image instead of racing a load.
+    await preloadLogo(clubInfo.logo_url)
     const batches: any[][] = []
     for (let i = 0; i < players.length; i += CARDS_PER_FILE) batches.push(players.slice(i, i + CARDS_PER_FILE))
     const multiFile = batches.length > 1
@@ -214,9 +217,8 @@ export default function PlayersPage() {
 
       for (const p of batches[b]) {
         const guardian = Array.isArray(p.guardian) ? p.guardian[0] : p.guardian
-        const qrUrl = await QRCode.toDataURL(`opfc://player/${p.id}`, {
-          color: { dark: '#4EC6C6', light: '#0D1B2A' }, width: 200, margin: 2,
-        })
+        const qrUrl = await playerQrDataUrl(p.id)
+        if (p.photo_url) await prepareImage(p.photo_url, { kind: 'cover', aspect: 112 / 140 })
         setRenderPlayer(p)
         setRenderQrUrl(qrUrl)
         // Wait two frames so React has committed and the browser has painted
@@ -301,6 +303,9 @@ export default function PlayersPage() {
             className="btn-secondary flex items-center gap-2 self-start text-sm">
             <FileStack size={14}/> {bulkProgress ? `${bulkProgress.done}/${bulkProgress.total}…` : 'Download All Cards'}
           </button>
+          <Link href="/coach/players/qr-check" className="btn-secondary flex items-center gap-2 self-start text-sm">
+            <ShieldCheck size={14}/> Verify QRs
+          </Link>
           <Link href="/coach/players/import" className="btn-secondary flex items-center gap-2 self-start text-sm">
             <span>↑</span> Import
           </Link>

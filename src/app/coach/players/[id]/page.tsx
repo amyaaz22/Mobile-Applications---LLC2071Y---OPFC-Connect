@@ -7,7 +7,7 @@ import { categoryColor, formatDate, getAge, getCurrentMonth, paymentStatusColor 
 import { toast } from 'react-hot-toast'
 import { ArrowLeft, Edit3, Save, Trash2, UserCheck } from 'lucide-react'
 import Link from 'next/link'
-import QRCode from 'qrcode'
+import { playerQrDataUrl } from '@/lib/cardQr'
 import { usePermissionGuard } from '@/hooks/usePermissionGuard'
 import { logAudit } from '@/lib/audit'
 
@@ -63,10 +63,7 @@ export default function PlayerDetailPage() {
     setAttitude(latestStats?.attitude ?? '')
 
     // Generate QR
-    const qrData = `opfc://player/${p.id}`
-    const qrDataUrl = await QRCode.toDataURL(qrData, {
-      color: { dark: '#4EC6C6', light: '#0D1B2A' }, width: 200, margin: 2
-    })
+    const qrDataUrl = await playerQrDataUrl(p.id)
     setQrUrl(qrDataUrl)
 
     // Get attendance
