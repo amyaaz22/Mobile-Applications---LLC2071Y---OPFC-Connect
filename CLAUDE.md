@@ -52,6 +52,11 @@ Built for the club's daily operations AND as a Year 3 BSc dissertation project.
 2. **All dashboard pages are `'use client'`** — no server components for data fetching. Use `createClient()` from `@/lib/supabase/client` everywhere.
 3. **After login:** `window.location.href = '/'` — hard reload, not router.push
 4. **Server client** (`@/lib/supabase/server`) is ONLY used in API routes.
+   Its cookie adapter MUST use the `get`/`set`/`remove` shape, not
+   `getAll`/`setAll` — see the critical bug writeup at the top of "Current
+   Known Issues / TODO" below before touching this file; the two shapes
+   look equally plausible but only one actually works with the
+   `@supabase/ssr` version this project has pinned.
 5. **Never include `ovr` in player_stats upsert** — it's a GENERATED ALWAYS column.
 
 ---
@@ -228,6 +233,43 @@ supabase/
 ---
 
 ## Current Known Issues / TODO
+**Critical fix, found live in production:** every server-side API route
+that gates on "is this caller signed in" — chiefly `/api/staff/invite` —
+had *always* returned 401 "Not signed in" for every real attempt, in
+production, since the route was written. Root cause: `src/lib/supabase/
+server.ts`'s cookie adapter implemented `getAll`/`setAll` (the *modern*
+`@supabase/ssr` API), but the version actually pinned in
+`package-lock.json` and installed is `@supabase/ssr@0.3.0`, whose
+`createServerClient` only recognizes the older `get`/`set`/`remove` shape
+(confirmed directly from that package's own compiled source — it does
+`typeof cookies.get === 'function'` internally, which is simply never true
+for a `{getAll, setAll}` object). Neither shape errors or warns — the
+adapter is just silently never called, so `auth.getUser()` always resolved
+to no session server-side, even though the browser-side session was
+completely fine (which is why everything else in the app — client-side
+auth, every feature's own CoachGuard checks — kept working normally and
+masked this for as long as it did). Caught when the user hit it live
+clicking **Grant Access** for a parent (see "Parent Account Management"
+below) and reported it directly with a screenshot showing "Not signed in".
+Verified both the diagnosis and the fix with a temporary read-only
+diagnostic route (never the real invite endpoint, to avoid any production
+side effects while root-causing it) confirming `auth.getUser()` went from
+always-null to correctly resolving the real signed-in user once `server.ts`
+was switched to the `get`/`set`/`remove` shape — then independently
+re-confirmed the same fix also resolved **two other routes that had the
+identical, previously-unnoticed bug**: `/api/admin/users` (the Super Admin
+panel's Accounts tab had *never* actually loaded any accounts in
+production — always 401'd) and `/api/attendance/sync` (offline-synced
+attendance rows had *never* actually gotten `scanned_by` set, silently
+undermining the "scanned-by-provenance" guarantee documented elsewhere in
+this file as already fixed — it never was, until now). All three routes
+share the one `createClient()` function, so the one-file fix covers all of
+them. **Action needed:** none of the invites anyone has "sent" from this
+app before this fix actually created an account (every invite attempt
+silently failed server-side) — if the club believes a coach or parent was
+invited previously and never got the email, that's why; re-invite them now
+that this is fixed.
+
 Most recent round: Registration Windows + Coach Applications (schema v16 —
 see those sections above for the full design). Built in direct response to
 the club wanting control over `/apply` being open to spam at all times, plus
